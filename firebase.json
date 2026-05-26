@@ -1,0 +1,12 @@
+{
+  "hosting": {
+    "public": ".",
+    "ignore": [
+      "firebase.json",
+      "**/.*",
+      "firebase-config.js.example",
+      "HANDOFF.md",
+      "*.md"
+    ]
+  }
+}

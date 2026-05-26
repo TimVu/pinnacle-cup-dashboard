@@ -1,0 +1,16 @@
+// ==============================================================
+// PINNACLE CUP DASHBOARD — Firebase Config
+// ==============================================================
+// Copy this file: firebase-config.js.example → firebase-config.js
+// Fill in your values from Firebase Console → Project Settings
+// Do NOT commit firebase-config.js (it's in .gitignore)
+// ==============================================================
+
+window.FIREBASE_CONFIG = {
+  apiKey:            "YOUR_API_KEY",
+  authDomain:        "pinnacle-cup-ios.firebaseapp.com",
+  projectId:         "pinnacle-cup-ios",
+  storageBucket:     "pinnacle-cup-ios.firebasestorage.app",
+  messagingSenderId: "YOUR_MESSAGING_SENDER_ID",
+  appId:             "YOUR_APP_ID",
+};

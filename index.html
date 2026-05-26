@@ -1,0 +1,1054 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>The Pinnacle Cup — Live Dashboard</title>
+  <!--
+    Phase 1: Static layout            — complete ✓
+    Phase 2: Firebase data layer      — complete ✓
+    Phase 3: Scene rotation           — complete ✓
+    Phase 4: Animations + prize reveal
+  -->
+  <script src="firebase-config.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-app-compat.js"></script>
+  <script src="https://www.gstatic.com/firebasejs/9.23.0/firebase-firestore-compat.js"></script>
+  <style>
+    :root {
+      --summit-brown:      #432525;
+      --summit-cornflower: #94B5FF;
+      --summit-butter:     #F8FDCB;
+      --sys-bg:            #F2F2F7;
+      --sys-card:          rgba(255,255,255,0.92);
+      --sys-sep:           rgba(0,0,0,0.07);
+      --sys-sep-thin:      rgba(0,0,0,0.05);
+      --label:             #1C1C1E;
+      --label-3:           #8E8E93;
+      --label-4:           #C7C7CC;
+      --ios-blue:          #007AFF;
+      --ios-green:         #34C759;
+      --ios-red:           #FF3B30;
+      --ios-amber:         #FF9F0A;
+      --eagle:             #FFD60A;
+      --birdie:            #34C759;
+      --par:               #8E8E93;
+      --bogey:             #FF3B30;
+    }
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    html, body {
+      width: 100vw; height: 100vh; overflow: hidden; background: var(--sys-bg);
+      font-family: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Helvetica Neue', Arial, sans-serif;
+      -webkit-font-smoothing: antialiased;
+    }
+    #app { width: 100%; height: 100%; display: flex; flex-direction: column; }
+
+    /* ── HEADER ───────────────────────────────────────────── */
+    #header {
+      background: var(--summit-brown); height: 58px; flex-shrink: 0;
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 0 20px; gap: 16px;
+    }
+    .header-left  { display: flex; align-items: center; gap: 12px; }
+    .header-right { display: flex; align-items: center; gap: 12px; flex-shrink: 0; }
+    #event-logo-slot {
+      width: 38px; height: 38px; border-radius: 9px; background: var(--summit-cornflower);
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0; overflow: hidden;
+    }
+    #event-logo-slot img { width: 100%; height: 100%; object-fit: contain; }
+    .cup-wordmark h1 {
+      font-family: Georgia, serif; font-size: 22px; font-weight: 700;
+      color: var(--summit-butter); letter-spacing: 3px; text-transform: uppercase; line-height: 1;
+    }
+    .cup-wordmark p { font-size: 11px; color: rgba(248,253,203,0.48); margin-top: 3px; }
+    .summit-tag { background: rgba(148,181,255,0.1); border: 0.5px solid rgba(148,181,255,0.22); border-radius: 7px; padding: 4px 10px; text-align: right; }
+    .summit-tag .presented  { font-size: 9px;  color: rgba(148,181,255,0.45); letter-spacing: 0.8px; text-transform: uppercase; }
+    .summit-tag .summit-name{ font-size: 13px; color: var(--summit-cornflower); font-weight: 500; }
+    .scene-dots { display: flex; gap: 4px; align-items: center; }
+    .scene-dot { width: 6px; height: 6px; border-radius: 50%; background: rgba(148,181,255,0.25); transition: background 0.3s; }
+    .scene-dot.active { background: var(--summit-cornflower); }
+    .live-pill { display: flex; align-items: center; gap: 5px; background: rgba(255,59,48,0.15); border: 0.5px solid rgba(255,59,48,0.35); border-radius: 20px; padding: 4px 10px; }
+    .live-dot  { width: 7px; height: 7px; border-radius: 50%; background: var(--ios-red); animation: livePulse 1.5s ease-in-out infinite; flex-shrink: 0; }
+    @keyframes livePulse { 0%,100%{opacity:1} 50%{opacity:0.2} }
+    .live-pill span { font-size: 12px; font-weight: 700; color: var(--ios-red); letter-spacing: 1px; }
+    #app.offline .live-dot        { background: var(--label-4); animation: none; }
+    #app.offline .live-pill       { border-color: rgba(199,199,204,0.3); background: rgba(199,199,204,0.08); }
+    #app.offline .live-pill span  { color: var(--label-4); }
+
+    /* ── BODY ─────────────────────────────────────────────── */
+    #body { flex: 1; display: flex; gap: 1px; background: rgba(0,0,0,0.08); overflow: hidden; min-height: 0; }
+    .section-header {
+      padding: 6px 12px; background: rgba(242,242,247,0.96); border-bottom: 0.5px solid rgba(0,0,0,0.07);
+      display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+    }
+    .section-label { font-size: 11px; font-weight: 600; color: var(--label-3); letter-spacing: 1.2px; text-transform: uppercase; }
+    .section-badge { font-size: 10px; color: var(--ios-blue); font-weight: 500; }
+    .card { background: var(--sys-card); border-radius: 12px; border: 0.5px solid var(--sys-sep); overflow: hidden; }
+    .score-pill { font-size: 13px; font-weight: 700; padding: 2px 8px; border-radius: 5px; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+    .score-pill.neg  { color: var(--birdie); background: rgba(52,199,89,0.1); }
+    .score-pill.pos  { color: var(--bogey);  background: rgba(255,59,48,0.1); }
+    .score-pill.even { color: var(--par);    background: rgba(142,142,147,0.1); }
+
+    /* ── LEFT PANEL ───────────────────────────────────────── */
+    #panel-leaderboard { width: 25%; background: var(--sys-bg); display: flex; flex-direction: column; overflow: hidden; }
+    .panel-section-label { font-size: 11px; font-weight: 600; color: var(--label-3); letter-spacing: 1px; text-transform: uppercase; padding: 7px 12px 3px; flex-shrink: 0; }
+    #leader-hero { margin: 0 10px 4px; padding: 16px 18px; background: var(--summit-brown); border-radius: 14px; flex-shrink: 0; }
+    .hero-eyebrow { font-size: 10px; font-weight: 700; color: var(--summit-cornflower); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 10px; }
+    .hero-content { display: flex; align-items: flex-start; gap: 10px; }
+    .hero-name { flex: 1; min-width: 0; }
+    .hero-name h2 { font-size: 22px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .hero-name .hero-thru { font-size: 13px; color: rgba(255,255,255,0.45); margin-top: 3px; }
+    .hero-score { font-size: 32px; font-weight: 700; color: var(--summit-cornflower); letter-spacing: -1.5px; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+    #team-list { margin: 0 10px; flex-shrink: 0; }
+    .team-row { display: flex; align-items: center; padding: 8px 12px; border-bottom: 0.5px solid var(--sys-sep-thin); background: var(--sys-card); }
+    .team-row:last-child { border-bottom: none; }
+    .team-rank { font-size: 13px; font-weight: 600; color: var(--label-3); width: 18px; text-align: center; flex-shrink: 0; }
+    .team-info { flex: 1; padding: 0 10px; min-width: 0; }
+    .team-info .name { font-size: 14px; font-weight: 600; color: var(--label); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; line-height: 1.2; }
+    .team-info .thru { font-size: 11px; color: var(--label-4); margin-top: 2px; line-height: 1; }
+    .rank-delta { font-size: 11px; font-weight: 600; min-width: 22px; text-align: right; margin-left: 6px; flex-shrink: 0; transition: color 0.6s ease; }
+    .rank-delta.up   { color: var(--ios-green); }
+    .rank-delta.down { color: var(--ios-red); }
+    .rank-delta.none { color: transparent; user-select: none; }
+    #competitions-card { margin: 0 10px 8px; flex-shrink: 0; }
+    .comp-row { display: flex; align-items: flex-start; gap: 10px; padding: 12px 14px; border-bottom: 0.5px solid var(--sys-sep-thin); }
+    .comp-row:last-child { border-bottom: none; }
+    .comp-icon { font-size: 18px; flex-shrink: 0; padding-top: 1px; }
+    .comp-body { flex: 1; min-width: 0; }
+    .comp-body .comp-label  { font-size: 10px; color: var(--label-3); font-weight: 500; margin-bottom: 4px; }
+    .comp-body .comp-winner { font-size: 14px; font-weight: 600; color: var(--label); }
+    .comp-badge { font-size: 9px; font-weight: 700; border-radius: 3px; padding: 2px 6px; flex-shrink: 0; margin-top: 3px; }
+    .comp-badge.leader { color: var(--ios-blue);  background: rgba(0,122,255,0.12); }
+    .comp-badge.final  { color: #fff;             background: var(--ios-green); }
+
+    /* ── CENTER PANEL ─────────────────────────────────────── */
+    #panel-highlights { flex: 1; background: var(--sys-bg); display: flex; flex-direction: column; padding: 7px 8px; gap: 6px; overflow: hidden; min-width: 0; }
+    .highlights-bar { display: flex; align-items: center; justify-content: space-between; padding: 0 2px; flex-shrink: 0; }
+    #featured-card { flex: 4; min-height: 0; position: relative; }
+    #scene-photo, #scene-tracer { transition: opacity 0.4s ease; }
+
+    /* ── Scene: photo ─────────────────────────────────────── */
+    #scene-photo { width: 100%; height: 100%; border-radius: 12px; overflow: hidden; background: #1C1C1E; }
+    .photo-zone  { width: 100%; height: 100%; position: relative; display: flex; align-items: center; justify-content: center; }
+    .photo-zone > img.featured-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+    .photo-fpo-icon { color: rgba(255,255,255,0.1); width: 40px; height: 40px; position: relative; z-index: 1; }
+    .photo-overlay {
+      position: absolute; bottom: 0; left: 0; right: 0; z-index: 2;
+      background: linear-gradient(transparent 0%, rgba(0,0,0,0.3) 35%, rgba(0,0,0,0.88) 100%);
+      padding: 44px 14px 13px;
+    }
+    .photo-caption-text { font-size: 14px; color: rgba(255,255,255,0.95); line-height: 1.4; margin-bottom: 10px; text-shadow: 0 1px 6px rgba(0,0,0,0.8); }
+    .photo-info-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    /*
+     * Author: plain text with strong shadow — no pill, as Tim requested.
+     * The gradient provides enough contrast; the shadow anchors the text.
+     */
+    .photo-author-text {
+      font-size: 13px; font-weight: 600; color: #fff;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.7), 0 2px 14px rgba(0,0,0,0.5);
+      flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    /*
+     * Hole/time metadata: semi-transparent pill.
+     * Lighter and more subtle than the old solid dark pill.
+     */
+    .photo-meta-pill {
+      background: rgba(0,0,0,0.42);
+      border: 0.5px solid rgba(255,255,255,0.12);
+      backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px);
+      border-radius: 6px; padding: 3px 8px;
+      font-size: 11px; font-weight: 500; color: rgba(255,255,255,0.82);
+      flex-shrink: 0; white-space: nowrap;
+    }
+
+    /* ── Scene: shot tracer (overlay like photos, no footer bar) ── */
+    #scene-tracer {
+      width: 100%; height: 100%; display: none; flex-direction: column;
+      background: #000; border-radius: 12px; border: 0.5px solid rgba(255,255,255,0.06);
+      overflow: hidden; position: absolute; inset: 0;
+    }
+    .tracer-video-zone { flex: 1; position: relative; min-height: 0; background: #000; overflow: hidden; }
+    #tracer-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+    .tracer-placeholder { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; z-index: 1; }
+    .tracer-play-btn { width: 52px; height: 52px; border-radius: 50%; background: rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; }
+    .tracer-play-btn svg { width: 22px; height: 22px; fill: rgba(255,255,255,0.5); margin-left: 3px; }
+    .tracer-badge { position: absolute; top: 12px; left: 12px; z-index: 3; background: rgba(0,0,0,0.6); border: 0.5px solid rgba(255,255,255,0.18); border-radius: 6px; padding: 3px 9px; font-size: 10px; font-weight: 600; color: rgba(255,255,255,0.75); letter-spacing: 0.8px; text-transform: uppercase; }
+    /*
+     * Tracer overlay: same gradient-over-video pattern as photos.
+     * Team name as author-text; hole/time as meta-pill.
+     */
+    .tracer-overlay {
+      position: absolute; bottom: 0; left: 0; right: 0; z-index: 2;
+      background: linear-gradient(transparent 0%, rgba(0,0,0,0.3) 35%, rgba(0,0,0,0.88) 100%);
+      padding: 44px 14px 13px;
+      display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    }
+
+    /* ── HIGHLIGHTS BOTTOM ────────────────────────────────── */
+    .highlights-bottom { flex: 2; min-height: 0; display: flex; flex-direction: row; gap: 6px; }
+
+    /* ── HOLE SPOTLIGHT CARD ──────────────────────────────── */
+    #hole-spotlight-card {
+      flex: 1; min-width: 0;
+      background: var(--sys-card); border-radius: 12px; border: 0.5px solid var(--sys-sep);
+      overflow: hidden; display: flex; flex-direction: column;
+      transition: opacity 0.35s ease;
+    }
+
+    /*
+     * Header: "Hole" + large number on same baseline (not stacked).
+     * Avoids the awkward tiny "HOLE" above huge "6" layout.
+     */
+    .hole-header {
+      background: var(--summit-brown); padding: 10px 16px 8px;
+      display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+    }
+    .hole-id { display: flex; align-items: baseline; gap: 7px; }
+    .hole-word { font-size: 14px; font-weight: 600; color: rgba(248,253,203,0.5); letter-spacing: 0.5px; text-transform: uppercase; }
+    .hole-number { font-family: Georgia, serif; font-size: 38px; font-weight: 700; color: var(--summit-butter); line-height: 1; }
+    .hole-meta { text-align: right; }
+    .hole-meta .par-yards { font-size: 11px; color: rgba(248,253,203,0.55); }
+    .hole-meta .avg-score { font-size: 10px; color: rgba(148,181,255,0.65); margin-top: 3px; }
+    .hole-meta .avg-score strong { color: var(--summit-cornflower); }
+
+    /*
+     * Body: two-column layout.
+     * Left (120px fixed): donut + compact legend — better uses the horizontal space.
+     * Right (flex:1): score rows without gap issue.
+     */
+    .hole-body { flex: 1; min-height: 0; display: flex; flex-direction: row; }
+
+    .hole-chart-col {
+      width: 240px; flex-shrink: 0;
+      display: flex; flex-direction: column; align-items: center; justify-content: center;
+      padding: 10px 8px;
+      border-right: 0.5px solid var(--sys-sep-thin);
+    }
+
+    /* Compact vertical legend below donut */
+    .hole-legend-v { width: 100%; margin-top: 8px; display: flex; flex-direction: column; gap: 3px; }
+    .legend-v-item { display: flex; align-items: center; gap: 5px; }
+    .legend-v-dot  { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+    .legend-v-label { font-size: 9px; color: var(--label-3); flex: 1; }
+    .legend-v-count { font-size: 9px; font-weight: 700; color: var(--label); }
+
+    .hole-scores-col { flex: 1; min-width: 0; display: flex; flex-direction: column; overflow: hidden; }
+    .hole-scores-mini-header {
+      padding: 4px 12px 3px; background: rgba(242,242,247,0.6);
+      border-bottom: 0.5px solid var(--sys-sep-thin);
+      font-size: 10px; font-weight: 600; color: var(--label-3);
+      letter-spacing: 0.8px; text-transform: uppercase; flex-shrink: 0;
+    }
+
+    /*
+     * Score row: score value LEFT, dot, team name.
+     * Fixes the "big gap" — team name fills rightward, no trailing whitespace.
+     * Grid: 24px(score) 12px(dot) 1fr(name)
+     */
+    .hole-score-row {
+      display: grid;
+      grid-template-columns: 26px 10px 1fr;
+      align-items: center;
+      gap: 6px;
+      padding: 5px 12px;
+      border-bottom: 0.5px solid var(--sys-sep-thin);
+      flex-shrink: 0;
+    }
+    .hole-score-row:last-child { border-bottom: none; }
+
+    .hole-score-val {
+      font-size: 12px; font-weight: 700; font-variant-numeric: tabular-nums;
+      text-align: right;
+    }
+    .hole-score-val.eagle   { color: #9A7500; }
+    .hole-score-val.birdie  { color: var(--birdie); }
+    .hole-score-val.par     { color: var(--label-3); }
+    .hole-score-val.bogey   { color: var(--bogey); }
+    .hole-score-val.unplayed { color: var(--label-4); }
+
+    .hole-score-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+    .hole-score-dot.eagle   { background: #FFD60A; }
+    .hole-score-dot.birdie  { background: #34C759; }
+    .hole-score-dot.par     { background: #8E8E93; }
+    .hole-score-dot.bogey   { background: #FF3B30; }
+    .hole-score-dot.unplayed { background: var(--label-4); }
+
+    .hole-score-team {
+      font-size: 12px; font-weight: 600; color: var(--label);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+
+    /* Stats row: pinned to bottom via margin-top:auto */
+    .hole-stats-row {
+      display: flex; align-items: center; gap: 10px;
+      padding: 6px 14px; border-top: 0.5px solid var(--sys-sep-thin);
+      flex-shrink: 0; margin-top: auto;
+    }
+    .hole-stat { display: flex; align-items: center; gap: 5px; }
+    .hole-stat .stat-icon  { font-size: 12px; }
+    .hole-stat .stat-value { font-size: 12px; font-weight: 700; color: var(--label); }
+    .hole-stat .stat-label { font-size: 11px; color: var(--label-3); }
+    .stat-sep { font-size: 11px; color: var(--label-4); }
+
+    /* ── HEATMAP PANEL ────────────────────────────────────── */
+    /*
+     * No header/title — removed.
+     * Legend moves to the bottom.
+     * Column labels remain for F9/B9 orientation.
+     */
+    #heatmap-panel {
+      width: 180px; flex-shrink: 0;
+      background: var(--sys-card); border-radius: 12px; border: 0.5px solid var(--sys-sep);
+      overflow: hidden; display: flex; flex-direction: column;
+    }
+    .heatmap-col-labels {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 4px; padding: 8px 8px 3px; flex-shrink: 0;
+    }
+    .heatmap-col-label { font-size: 9px; font-weight: 600; color: var(--label-3); letter-spacing: 0.8px; text-transform: uppercase; text-align: center; }
+    .heatmap-grid {
+      flex: 1; min-height: 0;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      grid-template-rows: repeat(9, 1fr);
+      grid-auto-flow: column;
+      gap: 4px; padding: 2px 8px 4px;
+    }
+    .heatmap-chip {
+      border-radius: 5px;
+      display: flex; align-items: center; justify-content: center;
+      font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums;
+    }
+    .heatmap-chip.unplayed { background: rgba(0,0,0,0.06); color: var(--label-4); }
+    .heatmap-chip.eagle    { background: #FFD60A; color: #432525; }
+    .heatmap-chip.birdie   { background: #34C759; color: #fff; }
+    .heatmap-chip.par      { background: #8E8E93; color: #fff; }
+    .heatmap-chip.bogey    { background: #FF3B30; color: #fff; }
+    /*
+     * Spotlight: single cornflower ring + subtle glow.
+     * No color override — chip keeps its natural score color.
+     */
+    .heatmap-chip.spotlight {
+      box-shadow: 0 0 0 2px var(--summit-cornflower), 0 0 8px rgba(148,181,255,0.35);
+    }
+    /* Legend at the bottom of the heatmap panel */
+    .heatmap-legend-bottom {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 4px 6px;
+      padding: 5px 8px 7px; border-top: 0.5px solid var(--sys-sep-thin);
+      flex-shrink: 0;
+    }
+    .heatmap-legend-item { display: flex; align-items: center; gap: 4px; }
+    .heatmap-legend-dot  { width: 7px; height: 7px; border-radius: 2px; flex-shrink: 0; }
+    .heatmap-legend-label { font-size: 9px; color: var(--label-3); }
+
+    /* ── RIGHT PANEL ──────────────────────────────────────── */
+    #panel-feed { width: 28%; background: var(--sys-bg); display: flex; flex-direction: column; overflow: hidden; }
+    #feed-list  { flex: 1; display: flex; flex-direction: column; gap: 1px; background: rgba(0,0,0,0.05); overflow: hidden; }
+    .feed-item  { background: var(--sys-card); padding: 8px 12px; flex-shrink: 0; }
+    .feed-author { font-size: 12px; font-weight: 600; margin-bottom: 3px; display: flex; align-items: center; gap: 0; flex-wrap: wrap; }
+    .feed-author.director { color: var(--ios-green); }
+    .feed-author.team     { color: var(--ios-blue); }
+    .feed-author.alert    { color: var(--ios-amber); }
+    /* Team name tag next to author name */
+    .feed-team-tag { font-size: 10px; font-weight: 500; color: var(--label-4); margin-left: 5px; }
+    .feed-body { font-size: 13px; color: var(--label); line-height: 1.4; }
+    .feed-photo { width: 100%; max-height: 200px; border-radius: 8px; overflow: hidden; margin: 5px 0 3px; display: block; }
+    .feed-photo img { width: 100%; height: auto; max-height: 200px; object-fit: cover; display: block; border-radius: 8px; }
+    .feed-time { font-size: 10px; color: var(--label-4); margin-top: 3px; }
+
+    /* ── PRIZE REVEAL ─────────────────────────────────────── */
+    #prize-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.95); display: flex; align-items: center; justify-content: center; z-index: 1000; opacity: 0; pointer-events: none; transition: opacity 0.6s ease; }
+    #prize-overlay.visible { opacity: 1; pointer-events: all; }
+    .prize-card { background: var(--summit-brown); border-radius: 24px; padding: 52px 80px; text-align: center; border: 1px solid rgba(148,181,255,0.18); max-width: 720px; width: 90%; transform: scale(0.85); opacity: 0; transition: transform 0.55s cubic-bezier(0.34,1.56,0.64,1), opacity 0.45s ease; }
+    #prize-overlay.visible .prize-card { transform: scale(1); opacity: 1; }
+    .prize-official    { font-family: Georgia, serif; font-size: 13px; font-weight: 700; color: var(--summit-butter); letter-spacing: 4px; text-transform: uppercase; opacity: 0.65; margin-bottom: 10px; }
+    .prize-competition { font-size: 20px; color: var(--summit-cornflower); margin-bottom: 4px; }
+    .prize-hole-info   { font-size: 14px; color: rgba(148,181,255,0.5); margin-bottom: 36px; }
+    .prize-winner-name { font-family: Georgia, serif; font-size: 56px; font-weight: 700; color: #fff; line-height: 1.1; }
+
+    /* ── FOOTER ───────────────────────────────────────────── */
+    #footer { background: rgba(255,255,255,0.92); border-top: 0.5px solid rgba(0,0,0,0.07); height: 34px; flex-shrink: 0; display: flex; align-items: center; padding: 0 16px; gap: 12px; }
+    .footer-live { display: flex; align-items: center; gap: 5px; flex-shrink: 0; }
+    .footer-live .live-dot { width: 5px; height: 5px; }
+    .footer-live span { font-size: 11px; font-weight: 700; color: var(--ios-red); letter-spacing: 0.8px; }
+    .footer-divider { width: 0.5px; height: 14px; background: rgba(0,0,0,0.1); flex-shrink: 0; }
+    #ticker-wrap { flex: 1; overflow: hidden; min-width: 0; }
+    #ticker-inner { display: inline-flex; white-space: nowrap; animation: tickerScroll 80s linear infinite; }
+    #ticker-inner span { font-size: 12px; color: var(--label-3); padding-right: 80px; }
+    @keyframes tickerScroll { 0%{transform:translateX(0)} 100%{transform:translateX(-50%)} }
+    #course-logo-slot { display: flex; align-items: center; gap: 7px; flex-shrink: 0; border-left: 0.5px solid rgba(0,0,0,0.08); padding-left: 12px; }
+    #course-logo-slot.hidden { display: none; }
+    #course-logo-img { width: 26px; height: 26px; border-radius: 4px; background: var(--sys-bg); border: 0.5px solid rgba(0,0,0,0.08); object-fit: contain; }
+    .course-logo-text .course-label { font-size: 9px; color: var(--label-4); text-transform: uppercase; letter-spacing: 0.5px; }
+    .course-logo-text .course-name  { font-size: 11px; color: var(--label-3); font-weight: 500; }
+    .qr-area { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
+    .qr-area svg  { width: 20px; height: 20px; fill: var(--label-4); }
+    .qr-area span { font-size: 10px; color: var(--label-4); }
+  </style>
+</head>
+<body>
+<div id="app">
+
+  <header id="header">
+    <div class="header-left">
+      <!--
+        Event logo: populated from Firestore config/branding.eventLogoUrl.
+        Empty by default (just shows the cornflower background).
+        See HANDOFF.md for instructions on how to set both logos.
+      -->
+      <div id="event-logo-slot" title="The Pinnacle Cup"></div>
+      <div class="cup-wordmark">
+        <h1>The Pinnacle Cup</h1>
+        <p id="header-subtitle">June 4, 2026 &nbsp;·&nbsp; Wasatch Mountain Golf Club, Lake Course &nbsp;·&nbsp; Par 72 / 6,910 yds</p>
+      </div>
+    </div>
+    <div class="header-right">
+      <div class="summit-tag">
+        <div class="presented">Presented at</div>
+        <div class="summit-name">Pinnacle Summit 2026</div>
+      </div>
+      <div class="scene-dots" id="scene-dots" aria-hidden="true">
+        <div class="scene-dot active"></div>
+        <div class="scene-dot"></div>
+        <div class="scene-dot"></div>
+      </div>
+      <div class="live-pill" role="status" aria-live="polite">
+        <div class="live-dot"></div>
+        <span>LIVE</span>
+      </div>
+    </div>
+  </header>
+
+  <main id="body">
+
+    <!-- LEFT: Leaderboard -->
+    <section id="panel-leaderboard" aria-label="Team standings">
+      <div class="section-header">
+        <span class="section-label">Standings</span>
+        <span class="section-badge">&#916; since last submission</span>
+      </div>
+      <div class="panel-section-label">Team Prize</div>
+      <div id="leader-hero">
+        <div class="hero-eyebrow">Current Leader</div>
+        <div class="hero-content">
+          <div class="hero-name">
+            <h2 id="hero-team-name">&#8212;</h2>
+            <div class="hero-thru" id="hero-thru">Connecting&hellip;</div>
+          </div>
+          <div class="hero-score" id="hero-score">&#8212;</div>
+        </div>
+      </div>
+      <div id="team-list" class="card" style="margin:0 10px;">
+        <div class="team-row" style="justify-content:center;">
+          <span style="font-size:12px;color:var(--label-3);">Loading&hellip;</span>
+        </div>
+      </div>
+      <div class="panel-section-label" style="margin-top:4px;">Individual Prizes</div>
+      <div id="competitions-card" class="card">
+        <div class="comp-row">
+          <span class="comp-icon">&#127919;</span>
+          <div class="comp-body">
+            <div class="comp-label" id="ctp-label">Closest to Pin</div>
+            <div class="comp-winner" id="ctp-leader">&#8212;</div>
+          </div>
+          <span class="comp-badge leader" id="ctp-badge">LEADER</span>
+        </div>
+        <div class="comp-row">
+          <span class="comp-icon">&#128170;</span>
+          <div class="comp-body">
+            <div class="comp-label" id="ld-label">Longest Drive</div>
+            <div class="comp-winner" id="ld-leader">&#8212;</div>
+          </div>
+          <span class="comp-badge leader" id="ld-badge">LEADER</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- CENTER: Highlights -->
+    <section id="panel-highlights" aria-label="Highlights">
+      <div class="highlights-bar">
+        <span class="section-label">Highlights</span>
+        <div class="scene-dots" aria-hidden="true">
+          <div class="scene-dot active"></div>
+          <div class="scene-dot"></div>
+          <div class="scene-dot"></div>
+        </div>
+      </div>
+
+      <div id="featured-card">
+        <!-- Scene: photo post -->
+        <div id="scene-photo">
+          <div class="photo-zone">
+            <svg class="photo-fpo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1" aria-hidden="true">
+              <rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="12" cy="12" r="3"/>
+            </svg>
+            <div class="photo-overlay">
+              <p class="photo-caption-text" id="featured-caption" style="display:none;"></p>
+              <!--
+                Author: text-shadow only, no pill (Tim's request).
+                Hole/time: subtle semi-transparent pill on the right.
+              -->
+              <div class="photo-info-row">
+                <span class="photo-author-text" id="featured-author">Waiting for posts&hellip;</span>
+                <div class="photo-meta-pill" id="featured-location" style="display:none;"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Scene: shot tracer — overlay info on video, not a footer bar -->
+        <div id="scene-tracer">
+          <div class="tracer-video-zone">
+            <video id="tracer-video" muted autoplay loop playsinline></video>
+            <div class="tracer-placeholder">
+              <div class="tracer-play-btn">
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
+              </div>
+            </div>
+            <span class="tracer-badge">Shot Tracer</span>
+            <!-- Same overlay pattern as photos -->
+            <div class="tracer-overlay">
+              <span class="photo-author-text" id="tracer-author"></span>
+              <div class="photo-meta-pill" id="tracer-location" style="display:none;"></div>
+            </div>
+          </div>
+          <!-- No footer bar -->
+        </div>
+      </div>
+
+      <div class="highlights-bottom">
+
+        <!-- Hole spotlight card: two-column body -->
+        <div id="hole-spotlight-card">
+          <!--
+            Header: "Hole 6" inline (not stacked "HOLE / 6").
+            Improved spacing and visual hierarchy.
+          -->
+          <div class="hole-header">
+            <div class="hole-id">
+              <span class="hole-word">Hole</span>
+              <span class="hole-number" id="spotlight-number">&#8213;</span>
+            </div>
+            <div class="hole-meta">
+              <div class="par-yards" id="spotlight-par-yards">Loading&hellip;</div>
+              <div class="avg-score">Avg &nbsp;<strong id="spotlight-avg">&#8213;</strong></div>
+            </div>
+          </div>
+
+          <!--
+            Body: two-column.
+            Left: bigger donut (100px) + compact vertical legend — no wasted 2x2 grid.
+            Right: score rows — score VALUE on the left side so team name fills rightward (no gap).
+          -->
+          <div class="hole-body">
+            <div class="hole-chart-col">
+              <svg id="hole-donut" width="200" height="200" viewBox="0 0 60 60" aria-label="Score distribution">
+                <circle cx="30" cy="30" r="22" fill="none" stroke="#EBEBF0" stroke-width="10"/>
+              </svg>
+              <div class="hole-legend-v" id="hole-legend-v"></div>
+            </div>
+            <div class="hole-scores-col">
+              <div class="hole-scores-mini-header" id="hole-scores-header">Team scores</div>
+              <div id="hole-score-rows">
+                <div class="hole-score-row">
+                  <span class="hole-score-val unplayed">&#8213;</span>
+                  <div class="hole-score-dot unplayed"></div>
+                  <span class="hole-score-team" style="color:var(--label-3);">Waiting for scores&hellip;</span>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Stats: pinned to bottom via margin-top:auto -->
+          <div class="hole-stats-row">
+            <div class="hole-stat">
+              <span class="stat-icon">&#128248;</span>
+              <span class="stat-value" id="stat-photos">0</span>
+              <span class="stat-label">photos</span>
+            </div>
+            <span class="stat-sep">·</span>
+            <div class="hole-stat">
+              <span class="stat-icon">&#9971;</span>
+              <span class="stat-value" id="stat-scored">0</span>
+              <span class="stat-label">of 5 scored</span>
+            </div>
+            <span class="stat-sep">·</span>
+            <div class="hole-stat">
+              <span class="stat-icon">&#11015;</span>
+              <span class="stat-value" id="stat-under">0</span>
+              <span class="stat-label">under par</span>
+            </div>
+          </div>
+        </div><!-- /#hole-spotlight-card -->
+
+        <!--
+          Heatmap panel: no title/header.
+          Column labels (F9/B9) remain for orientation.
+          Legend moves to the bottom.
+          Spotlight: white gap + thick cornflower ring for high visibility.
+        -->
+        <div id="heatmap-panel">
+          <div class="heatmap-col-labels">
+            <span class="heatmap-col-label">Front 9</span>
+            <span class="heatmap-col-label">Back 9</span>
+          </div>
+          <div class="heatmap-grid" id="heatmap-grid"></div>
+          <div class="heatmap-legend-bottom">
+            <div class="heatmap-legend-item"><div class="heatmap-legend-dot" style="background:#FFD60A"></div><span class="heatmap-legend-label">Eagle</span></div>
+            <div class="heatmap-legend-item"><div class="heatmap-legend-dot" style="background:#34C759"></div><span class="heatmap-legend-label">Birdie</span></div>
+            <div class="heatmap-legend-item"><div class="heatmap-legend-dot" style="background:#8E8E93"></div><span class="heatmap-legend-label">Par</span></div>
+            <div class="heatmap-legend-item"><div class="heatmap-legend-dot" style="background:#FF3B30"></div><span class="heatmap-legend-label">Bogey</span></div>
+          </div>
+        </div>
+
+      </div><!-- /.highlights-bottom -->
+    </section>
+
+    <!-- RIGHT: Feed -->
+    <section id="panel-feed" aria-label="Activity feed">
+      <div class="section-header"><span class="section-label">Activity</span></div>
+      <div id="feed-list">
+        <div class="feed-item" style="display:flex;align-items:center;justify-content:center;">
+          <span style="font-size:12px;color:var(--label-3);">Connecting&hellip;</span>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+  <div id="prize-overlay" role="dialog" aria-modal="true" aria-label="Prize winner announcement">
+    <div class="prize-card">
+      <div class="prize-official">&#127942;&nbsp; Official Winner &nbsp;&#127942;</div>
+      <div class="prize-competition" id="prize-competition"></div>
+      <div class="prize-hole-info"   id="prize-hole-info"></div>
+      <div class="prize-winner-name" id="prize-winner"></div>
+    </div>
+  </div>
+
+  <footer id="footer">
+    <div class="footer-live" role="status">
+      <div class="live-dot" style="background:var(--ios-red);animation:livePulse 1.5s ease-in-out infinite;border-radius:50%;width:5px;height:5px;flex-shrink:0;"></div>
+      <span>LIVE</span>
+    </div>
+    <div class="footer-divider"></div>
+    <div id="ticker-wrap">
+      <div id="ticker-inner">
+        <span id="ticker-content-a">Connecting to live data&hellip;</span>
+        <span id="ticker-content-b" aria-hidden="true">Connecting to live data&hellip;</span>
+      </div>
+    </div>
+    <div id="course-logo-slot" class="hidden">
+      <img id="course-logo-img" src="" alt="">
+      <div class="course-logo-text">
+        <div class="course-label">Course</div>
+        <div class="course-name" id="course-logo-name">Wasatch Mountain</div>
+      </div>
+    </div>
+    <div class="qr-area">
+      <svg viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+        <rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="3" height="3"/>
+        <rect x="19" y="14" width="2" height="2"/><rect x="14" y="19" width="2" height="2"/>
+        <rect x="18" y="18" width="3" height="3"/>
+        <rect x="5" y="5" width="3" height="3" fill="#F2F2F7"/>
+        <rect x="16" y="5" width="3" height="3" fill="#F2F2F7"/>
+        <rect x="5" y="16" width="3" height="3" fill="#F2F2F7"/>
+      </svg>
+      <span>Get the app</span>
+    </div>
+  </footer>
+
+</div>
+
+<script>
+'use strict';
+
+const RANK_DELTA_TIMEOUT_MS = 10 * 60 * 1000;
+const FEED_MAX_DISPLAY      = 5;
+const SCENE_INTERVAL_MS     = 20_000;
+const SPOTLIGHT_INTERVAL_MS = 25_000;
+const DIRECTOR_RECENCY_MS   = 30 * 60 * 1000;
+
+const state = {
+  ready: { teams: false, scores: false, courseHoles: false },
+  teams: [], courseHoles: [], competitions: {}, scores: {},
+  rankedTeams: [], prevRanks: {}, rankDeltas: {},
+  feed: [], ctp: null, ld: null, shotTracers: [], branding: {},
+  prevCtpFinal: false, prevLdFinal: false, spotlightHole: null,
+};
+
+function initFirebase() {
+  if (!window.FIREBASE_CONFIG) { console.error('[Dashboard] firebase-config.js not loaded.'); return null; }
+  try {
+    firebase.initializeApp(window.FIREBASE_CONFIG);
+    const db = firebase.firestore();
+    console.log('[Dashboard] Firebase connected ✓'); return db;
+  } catch (e) { console.error('[Dashboard] init failed:', e); return null; }
+}
+
+function subscribeAll(db) {
+  db.doc('config/branding').onSnapshot(d => { state.branding = d.exists ? d.data() : {}; renderBranding(); }, e => console.warn('[branding]', e.message));
+  db.doc('config/course').onSnapshot(d => { if (!d.exists) return; state.courseHoles = d.data().holes || []; state.ready.courseHoles = true; tryRenderLeaderboard(); }, e => console.warn('[course]', e.message));
+  db.doc('config/competitions').onSnapshot(d => { if (d.exists) { state.competitions = d.data(); renderCompetitions(); } }, e => console.warn('[competitions]', e.message));
+  db.collection('teams').onSnapshot(snap => {
+    state.teams = snap.docs.map(d => ({ id: d.id, ...d.data() })).sort((a,b) => (a.sortOrder??99)-(b.sortOrder??99));
+    state.ready.teams = true; tryRenderLeaderboard(); window.spotlightRotator?.onDataUpdate();
+  }, e => console.warn('[teams]', e.message));
+  db.collection('scores').onSnapshot(snap => {
+    snap.forEach(d => { state.scores[d.id] = d.data(); });
+    state.ready.scores = true; tryRenderLeaderboard(); updateTicker(); window.spotlightRotator?.onDataUpdate();
+  }, e => console.warn('[scores]', e.message));
+  db.collection('feed').orderBy('timestamp','desc').limit(10).onSnapshot(snap => {
+    state.feed = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderFeed(); updateTicker(); window.sceneRotator?.onDataUpdate();
+  }, e => console.warn('[feed]', e.message));
+  db.doc('prizes/closestToPin').onSnapshot(d => {
+    const p=state.prevCtpFinal; state.ctp=d.exists?d.data():null; state.prevCtpFinal=state.ctp?.final??false;
+    renderCompetitions(); updateTicker(); if(state.ctp?.final&&!p)onPrizeFinalized('ctp',state.ctp);
+  }, e => console.warn('[ctp]', e.message));
+  db.doc('prizes/longestDrive').onSnapshot(d => {
+    const p=state.prevLdFinal; state.ld=d.exists?d.data():null; state.prevLdFinal=state.ld?.final??false;
+    renderCompetitions(); updateTicker(); if(state.ld?.final&&!p)onPrizeFinalized('ld',state.ld);
+  }, e => console.warn('[ld]', e.message));
+  db.collection('shotTracers').orderBy('timestamp','desc').limit(10).onSnapshot(snap => {
+    state.shotTracers = snap.docs.map(d => ({ id: d.id, ...d.data() })); window.sceneRotator?.onDataUpdate();
+  }, e => console.warn('[shotTracers]', e.message));
+  const setOnline = () => el('app').classList.toggle('offline', !navigator.onLine);
+  window.addEventListener('online',setOnline); window.addEventListener('offline',setOnline); setOnline();
+}
+
+// ── Leaderboard ───────────────────────────────────────────────
+function tryRenderLeaderboard() {
+  if (!state.ready.teams || !state.ready.scores || !state.ready.courseHoles) return;
+  computeLeaderboard(); renderLeaderboard(); renderHoleSpotlight(); updateTicker();
+}
+function computeLeaderboard() {
+  const r = state.teams.map(t => {
+    const sd=state.scores[t.id]||{}, h=sd.holes||Array(18).fill(null);
+    let p=0, n=0; h.forEach((s,i) => { if(s!=null){p+=s-(state.courseHoles[i]?.par??4);n++;} });
+    return { id:t.id, name:t.name, toPar:p, thru:n, submitted:sd.submitted??false, holes:h };
+  });
+  r.sort((a,b) => a.toPar!==b.toPar?a.toPar-b.toPar:b.thru-a.thru);
+  computeRankDeltas(r); state.rankedTeams = r;
+}
+function computeRankDeltas(nr) {
+  const m={}; nr.forEach((t,i) => m[t.id]=i+1);
+  if(Object.keys(state.prevRanks).length>0)
+    nr.forEach(t => { const o=state.prevRanks[t.id],n=m[t.id]; if(o!==undefined&&o!==n) state.rankDeltas[t.id]={delta:o-n,ts:Date.now()}; });
+  state.prevRanks=m;
+}
+function renderLeaderboard() {
+  if (!state.rankedTeams.length) return;
+  const ldr=state.rankedTeams[0];
+  el('hero-team-name').textContent = ldr.name;
+  el('hero-score').textContent     = fmtScore(ldr.toPar);
+  el('hero-thru').textContent      = ldr.submitted?'Thru 18 of 18 \u2713':`Thru ${ldr.thru} of 18`;
+
+  const list = el('team-list');
+
+  // FLIP — snapshot current row tops before the DOM update
+  const first = {};
+  list.querySelectorAll('[data-team-id]').forEach(row => {
+    first[row.dataset.teamId] = row.getBoundingClientRect().top;
+  });
+
+  // Render new rank order
+  list.innerHTML = state.rankedTeams.map((t,i) => {
+    const d=state.rankDeltas[t.id], a=d&&(Date.now()-d.ts<RANK_DELTA_TIMEOUT_MS);
+    const dc=a?(d.delta>0?'up':'down'):'none', dt=a?(d.delta>0?`\u25b2${d.delta}`:`\u25bc${Math.abs(d.delta)}`):`\u2014`;
+    const pc=t.toPar<0?'neg':t.toPar>0?'pos':'even', th=t.submitted?'Thru 18 of 18 \u2713':`Thru ${t.thru} of 18`;
+    return `<div class="team-row" data-team-id="${t.id}"><span class="team-rank">${i+1}</span><div class="team-info"><div class="name">${esc(t.name)}</div><div class="thru">${th}</div></div><span class="score-pill ${pc}">${fmtScore(t.toPar)}</span><span class="rank-delta ${dc}" ${dc==='none'?'aria-hidden="true"':''}>${dt}</span></div>`;
+  }).join('');
+
+  // FLIP — animate each row from its old position to its new one
+  list.querySelectorAll('[data-team-id]').forEach(row => {
+    const teamId = row.dataset.teamId;
+    if (first[teamId] === undefined) return; // newly added row, skip
+    const delta = first[teamId] - row.getBoundingClientRect().top;
+    if (Math.abs(delta) < 1) return; // no meaningful movement
+    row.style.transition = 'none';
+    row.style.transform  = `translateY(${delta}px)`;
+    row.getBoundingClientRect(); // force reflow to commit the snap
+    row.style.transition = 'transform 0.45s cubic-bezier(0.34, 1.2, 0.64, 1)';
+    row.style.transform  = 'translateY(0)';
+  });
+}
+
+// ── Hole Spotlight ────────────────────────────────────────────
+function renderHoleSpotlight() {
+  const h=getSpotlightHole(); if(!h)return;
+  const hi=h-1, info=state.courseHoles[hi]||{par:4,yards:0}, scores=getHoleScores(hi);
+  el('spotlight-number').textContent    = h;
+  el('spotlight-par-yards').textContent = `Par ${info.par} \u00b7 ${info.yards} yds`;
+  el('hole-scores-header').textContent  = `Team scores \u2014 Hole ${h}`;
+  const sub=scores.filter(s=>s.strokes!=null);
+  el('spotlight-avg').textContent = sub.length?fmtScore(Math.round(sub.reduce((a,s)=>a+s.relToPar,0)/sub.length*10)/10):'\u2014';
+
+  let eagle=0, birdie=0, par=0, bogey=0;
+  sub.forEach(s=>{if(s.relToPar<=-2)eagle++;else if(s.relToPar===-1)birdie++;else if(s.relToPar===0)par++;else bogey++;});
+
+  el('hole-donut').innerHTML = buildDonutSVG(eagle, birdie, par, bogey);
+
+  // Compact vertical legend in the chart column
+  el('hole-legend-v').innerHTML = [
+    { color:'#FFD60A', label:'Eagle',  count:eagle  },
+    { color:'#34C759', label:'Birdie', count:birdie },
+    { color:'#8E8E93', label:'Par',    count:par    },
+    { color:'#FF3B30', label:'Bogey',  count:bogey  },
+  ].map(({color,label,count}) =>
+    `<div class="legend-v-item"><div class="legend-v-dot" style="background:${color}"></div><span class="legend-v-label">${label}</span><span class="legend-v-count">${count}</span></div>`
+  ).join('');
+
+  // Score rows: score value LEFT → dot → team name (eliminates gap issue)
+  const sorted=[...scores].sort((a,b)=>{if(a.strokes==null&&b.strokes==null)return 0;if(a.strokes==null)return 1;if(b.strokes==null)return-1;return a.relToPar-b.relToPar;});
+  el('hole-score-rows').innerHTML = sorted.map(s=>{
+    if(s.strokes==null) return `<div class="hole-score-row"><span class="hole-score-val unplayed">\u2014</span><div class="hole-score-dot unplayed"></div><span class="hole-score-team">${esc(s.teamName)}</span></div>`;
+    const cls=s.relToPar<=-2?'eagle':s.relToPar===-1?'birdie':s.relToPar===0?'par':'bogey';
+    const ss=s.relToPar===0?'E':s.relToPar>0?`+${s.relToPar}`:`${s.relToPar}`;
+    return `<div class="hole-score-row"><span class="hole-score-val ${cls}">${ss}</span><div class="hole-score-dot ${cls}"></div><span class="hole-score-team">${esc(s.teamName)}</span></div>`;
+  }).join('');
+
+  renderHoleStats(h, scores);
+  renderHeatmap(h);
+}
+
+function getSpotlightHole() {
+  if(state.spotlightHole)return state.spotlightHole;
+  if(state.competitions.ctpHole)return state.competitions.ctpHole;
+  if(!state.courseHoles.length)return null;
+  const c=Array(18).fill(0);
+  Object.values(state.scores).forEach(d=>(d.holes||[]).forEach((s,i)=>{if(s!=null)c[i]++;}));
+  const m=Math.max(...c); return m===0?null:c.indexOf(m)+1;
+}
+function getHoleScores(hi) {
+  return state.teams.map(t=>{
+    const s=(state.scores[t.id]?.holes||[])[hi]??null, p=state.courseHoles[hi]?.par??4;
+    return{teamId:t.id,teamName:t.name,strokes:s,relToPar:s!=null?s-p:null};
+  });
+}
+function buildDonutSVG(eagle,birdie,par,bogey) {
+  const tot=eagle+birdie+par+bogey;
+  const base=`<circle cx="30" cy="30" r="22" fill="none" stroke="#EBEBF0" stroke-width="10"/>`;
+  if(!tot)return base;
+  const circ=2*Math.PI*22;
+  const segs=[{c:'#34C759',n:birdie},{c:'#8E8E93',n:par},{c:'#FF3B30',n:bogey},{c:'#FFD60A',n:eagle}];
+  let off=0;
+  return base+segs.map(({c,n})=>{if(!n)return'';const d=(n/tot)*circ,g=circ-d;const arc=`<circle cx="30" cy="30" r="22" fill="none" stroke="${c}" stroke-width="10" stroke-dasharray="${d.toFixed(2)} ${g.toFixed(2)}" stroke-dashoffset="${(-off).toFixed(2)}" transform="rotate(-90 30 30)"/>`;off+=d;return arc;}).join('');
+}
+function renderHoleStats(holeNum, scores) {
+  el('stat-photos').textContent = state.feed.filter(p=>p.holeNumber===holeNum&&p.imageUrl).length;
+  el('stat-scored').textContent = scores.filter(s=>s.strokes!=null).length;
+  el('stat-under').textContent  = scores.filter(s=>s.relToPar!=null&&s.relToPar<0).length;
+}
+function renderHeatmap(spotlightHole) {
+  const grid=el('heatmap-grid'); if(!grid)return;
+  grid.innerHTML=Array.from({length:18},(_,i)=>{
+    const holeNum=i+1, scores=getHoleScores(i).filter(s=>s.strokes!=null);
+    let cls='heatmap-chip unplayed';
+    if(scores.length>0){const best=Math.min(...scores.map(s=>s.relToPar));cls=`heatmap-chip ${best<=-2?'eagle':best===-1?'birdie':best===0?'par':'bogey'}`;}
+    if(holeNum===spotlightHole)cls+=' spotlight';
+    return`<div class="${cls}" title="Hole ${holeNum}">${holeNum}</div>`;
+  }).join('');
+}
+
+// ── Feed ──────────────────────────────────────────────────────
+function renderFeed() {
+  const posts=state.feed.slice(0,FEED_MAX_DISPLAY);
+  if(!posts.length){el('feed-list').innerHTML=`<div class="feed-item" style="display:flex;align-items:center;justify-content:center;"><span style="font-size:12px;color:var(--label-3);">No posts yet</span></div>`;return;}
+  el('feed-list').innerHTML=posts.map(p=>{
+    const dir=p.type==='director',alrt=p.type==='announcement'||p.type==='auto';
+    const ac=dir?'director':alrt?'alert':'team',ap=dir?'\u25cf\u00a0':alrt?'\u25b2\u00a0':'';
+    const ts=fmtTime(p.timestamp?.toDate?.()??null),ht=p.holeNumber?` \u00b7 \ud83d\udccd Hole ${p.holeNumber}`:'';
+    const ph=p.imageUrl?`<div class="feed-photo"><img src="${p.imageUrl}" alt="" loading="lazy" onerror="this.parentElement.style.display='none'"></div>`:'';
+    // Team name: from post.teamName or look up post.teamId in state.teams
+    const teamName=p.teamName||(p.teamId?state.teams.find(t=>t.id===p.teamId)?.name||'':'');
+    const teamBit=teamName?`<span class="feed-team-tag">${esc(teamName)}</span>`:'';
+    return`<article class="feed-item"><div class="feed-author ${ac}">${ap}${esc(p.author)}${teamBit}</div><p class="feed-body">${esc(p.text)}</p>${ph}<div class="feed-time">${ts}${ht}</div></article>`;
+  }).join('');
+}
+
+// ── Featured card ─────────────────────────────────────────────
+function renderFeaturedCard(post) {
+  if (!post) return;
+  // Author: text only, no avatar/pill
+  el('featured-author').textContent = post.author || '';
+  // Caption
+  const captionEl=el('featured-caption'),generic=!post.text||post.text.trim()==='\ud83d\udcf8 Shared a photo';
+  captionEl.textContent=generic?'':esc(post.text); captionEl.style.display=generic?'none':'';
+  // Metadata pill
+  const ts=fmtTime(post.timestamp?.toDate?.()??null),locEl=el('featured-location');
+  if(post.holeNumber||ts){locEl.textContent=(post.holeNumber?`\ud83d\udccd Hole ${post.holeNumber}${ts?' \u00b7 ':''}`:'')+ ts;locEl.style.display='';}
+  else locEl.style.display='none';
+  // Photo
+  const zone=document.querySelector('.photo-zone'),img=zone.querySelector('img.featured-img'),fpo=zone.querySelector('.photo-fpo-icon');
+  if(post.imageUrl){if(img){img.src=post.imageUrl;}else{const i=document.createElement('img');i.src=post.imageUrl;i.alt='';i.className='featured-img';i.onerror=()=>i.remove();zone.insertBefore(i,zone.firstChild);}if(fpo)fpo.style.display='none';}
+  else{if(img)img.remove();if(fpo)fpo.style.display='';}
+}
+
+// ── Competitions ──────────────────────────────────────────────
+function renderCompetitions() {
+  const c=state.competitions,ch=c.ctpHole??state.ctp?.hole??null;
+  el('ctp-label').textContent=ch?`CTP \u00b7 Hole ${ch}${holeInfo(ch)}`:'Closest to Pin';
+  el('ctp-leader').textContent=state.ctp?.leader||'\u2014';
+  if(state.ctp?.leader){el('ctp-badge').textContent=state.ctp.final?'WINNER \u2713':'LEADER';el('ctp-badge').className=state.ctp.final?'comp-badge final':'comp-badge leader';}
+  const lh=c.ldHole??state.ld?.hole??null;
+  el('ld-label').textContent=lh?`LD \u00b7 Hole ${lh}${holeInfo(lh)}`:'Longest Drive';
+  el('ld-leader').textContent=state.ld?.leader||'\u2014';
+  if(state.ld?.leader){el('ld-badge').textContent=state.ld.final?'WINNER \u2713':'LEADER';el('ld-badge').className=state.ld.final?'comp-badge final':'comp-badge leader';}
+}
+function holeInfo(n){const h=state.courseHoles[n-1];return h?` (Par ${h.par}, ${h.yards} yds)`:'';}
+
+// ── Branding ──────────────────────────────────────────────────
+function renderBranding(){
+  const{eventLogoUrl,courseLogoUrl,courseLogoName}=state.branding;
+  const s=el('event-logo-slot');
+  if(eventLogoUrl){
+    const ex=s.querySelector('img');
+    if(!ex||ex.src!==eventLogoUrl)
+      s.innerHTML=`<img src="${eventLogoUrl}" alt="Pinnacle Cup" onerror="this.parentElement.innerHTML=''" style="width:100%;height:100%;object-fit:contain;">`;
+  } else {
+    // No logo set — clear any previously injected image, slot shows cornflower bg
+    const ex=s.querySelector('img'); if(ex)ex.remove();
+  }
+  const cs=el('course-logo-slot');
+  if(courseLogoUrl){el('course-logo-img').src=courseLogoUrl;el('course-logo-img').alt=courseLogoName||'';if(courseLogoName)el('course-logo-name').textContent=courseLogoName;cs.classList.remove('hidden');}
+  else cs.classList.add('hidden');
+}
+
+// ── Ticker ────────────────────────────────────────────────────
+function updateTicker(){
+  const SEP=' \u00a0\u00b7\u00b7\u00b7\u00a0 ',DOT=' \u00b7 ',parts=[];
+  if(state.rankedTeams.length)parts.push(state.rankedTeams.map(t=>`${t.name} ${fmtScore(t.toPar)} (${t.submitted?'done':`thru ${t.thru}`})`).join(DOT));
+  if(state.ctp?.leader)parts.push(`${state.ctp.final?'CTP winner':'CTP leader'}: ${state.ctp.leader}`);
+  if(state.ld?.leader)parts.push(`${state.ld.final?'LD winner':'LD leader'}: ${state.ld.leader}`);
+  state.feed.slice(0,3).forEach(p=>{const hs=p.holeNumber?` on Hole ${p.holeNumber}`:'';if(p.type==='director')parts.push(`Director: \u201c${p.text.substring(0,70)}\u201d`);else if(p.imageUrl)parts.push(`${p.author} posted a photo${hs}`);else parts.push(`${p.author}: \u201c${p.text.substring(0,60)}\u201d`);});
+  if(!parts.length)return;
+  const v=parts.join(SEP)+SEP;el('ticker-content-a').textContent=v;el('ticker-content-b').textContent=v;
+  const i=el('ticker-inner');i.style.animation='none';i.offsetHeight;i.style.animation='';
+}
+function onPrizeFinalized(type,prize){
+  console.log(`[Prize] ${type}: ${prize.leader}`);
+  window.prizeReveal?.show(type, prize);
+}
+setInterval(()=>{let ch=false;Object.keys(state.rankDeltas).forEach(id=>{if(Date.now()-state.rankDeltas[id].ts>RANK_DELTA_TIMEOUT_MS){delete state.rankDeltas[id];ch=true;}});if(ch&&state.rankedTeams.length)renderLeaderboard();},60_000);
+
+// ── Scene Rotator ─────────────────────────────────────────────
+class SceneRotator {
+  constructor(){this.queue=[];this.idx=0;this.timer=null;this.transitioning=false;this.started=false;this.sceneStartTime=null;}
+  _buildQueue(){
+    const scenes=[],now=Date.now();
+    const dp=state.feed.find(p=>p.type==='director'&&p.imageUrl&&(p.timestamp?.toDate?.()?.getTime()??0)>now-DIRECTOR_RECENCY_MS);
+    if(dp)scenes.push({type:'photo',data:dp});
+    const pp=state.feed.filter(p=>p!==dp&&p.imageUrl).slice(0,5);
+    let ti=0;
+    pp.forEach((p,i)=>{scenes.push({type:'photo',data:p});if((i+1)%2===0&&ti<state.shotTracers.length)scenes.push({type:'tracer',data:state.shotTracers[ti++]});});
+    while(ti<Math.min(state.shotTracers.length,3))scenes.push({type:'tracer',data:state.shotTracers[ti++]});
+    return scenes;
+  }
+  onDataUpdate(){const q=this._buildQueue();if(!q.length)return;if(this.idx>=q.length)this.idx=0;this.queue=q;if(!this.started){this._showCurrent();this.timer=setInterval(()=>this._advance(),SCENE_INTERVAL_MS);this.started=true;}}
+  _advance(){this.queue=this._buildQueue();if(!this.queue.length)return;this.idx=(this.idx+1)%this.queue.length;this._showCurrent();}
+  _showCurrent(){
+    this.queue=this._buildQueue();if(!this.queue.length){this._fallback();return;}
+    if(this.idx>=this.queue.length)this.idx=0;
+    this.sceneStartTime=Date.now();
+    const s=this.queue[this.idx];
+    s.type==='photo'?this._go('photo',s.data):this._go('tracer',s.data);
+    this._dots();
+  }
+  async _go(type,data){
+    if(this.transitioning)return;this.transitioning=true;
+    const pEl=el('scene-photo'),tEl=el('scene-tracer'),showEl=type==='photo'?pEl:tEl,hideEl=type==='photo'?tEl:pEl;
+    if(showEl.style.display!=='none'&&showEl.style.display!==''){type==='photo'?renderFeaturedCard(data):this._tracer(data);this.transitioning=false;return;}
+    hideEl.style.opacity='0';await pause(400);hideEl.style.display='none';hideEl.style.opacity='';
+    type==='photo'?renderFeaturedCard(data):this._tracer(data);
+    showEl.style.opacity='0';showEl.style.display='flex';await pause(20);showEl.style.opacity='1';this.transitioning=false;
+  }
+  // Tracer: video overlay (same gradient/text pattern as photos, no footer bar)
+  _tracer(t){
+    const v=el('tracer-video');if(v.src!==t.videoUrl){v.src=t.videoUrl;v.load();}v.play().catch(()=>{});
+    const ph=document.querySelector('.tracer-placeholder');if(ph)ph.style.display='none';
+    el('tracer-author').textContent=t.teamName||'';
+    const locEl=el('tracer-location');
+    const hs=t.holeNumber?`\ud83d\udccd Hole ${t.holeNumber}`:'';
+    const ts=fmtTime(t.timestamp?.toDate?.()??null);
+    if(hs||ts){locEl.textContent=hs+(hs&&ts?' \u00b7 ':'')+ts;locEl.style.display='';}
+    else locEl.style.display='none';
+  }
+  _fallback(){el('scene-photo').style.display='flex';el('scene-tracer').style.display='none';}
+  _dots(){const dots=document.querySelectorAll('#panel-highlights .scene-dots .scene-dot'),pos=this.queue.length?this.idx%dots.length:0;dots.forEach((d,i)=>d.classList.toggle('active',i===pos));}
+}
+
+// ── Hole Spotlight Rotator ────────────────────────────────────
+class HoleSpotlightRotator {
+  constructor(){this.queue=[];this.idx=0;this.timer=null;this.started=false;}
+  _buildQueue(){
+    const out=[];for(let i=0;i<18;i++){if(state.teams.some(t=>(state.scores[t.id]?.holes??[])[i]!=null))out.push(i+1);}
+    const ctp=state.competitions.ctpHole,ld=state.competitions.ldHole;
+    return out.sort((a,b)=>{if(a===ctp&&b!==ctp)return-1;if(b===ctp&&a!==ctp)return 1;if(a===ld&&b!==ld)return-1;if(b===ld&&a!==ld)return 1;return a-b;});
+  }
+  onDataUpdate(){
+    const q=this._buildQueue();if(!q.length)return;
+    const cur=this.queue[this.idx],ni=q.indexOf(cur);this.queue=q;this.idx=ni>=0?ni:0;
+    state.spotlightHole=this.queue[this.idx]??null;renderHoleSpotlight();
+    if(!this.started){this.timer=setInterval(()=>this._rotate(),SPOTLIGHT_INTERVAL_MS);this.started=true;}
+  }
+  async _rotate(){
+    const q=this._buildQueue();if(q.length<=1)return;this.queue=q;this.idx=(this.idx+1)%q.length;state.spotlightHole=q[this.idx];
+    const c=el('hole-spotlight-card');c.style.opacity='0.15';await pause(350);renderHoleSpotlight();c.style.opacity='1';
+  }
+}
+
+// ── Phase 4: Prize Reveal ────────────────────────────────────
+/*
+ * Queues CTP and LD reveals; shows them sequentially (CTP first).
+ * Each prize holds for 12 seconds then auto-dismisses.
+ * Handles the edge case where both prizes finalize simultaneously.
+ */
+class PrizeReveal {
+  constructor() { this.queue = []; this.showing = false; this.timer = null; }
+
+  show(type, prize) {
+    this.queue.push({ type, prize });
+    if (!this.showing) this._next();
+  }
+
+  _next() {
+    if (!this.queue.length) { this.showing = false; return; }
+    this.showing = true;
+    const { type, prize } = this.queue.shift();
+    el('prize-competition').textContent = type === 'ctp' ? 'Closest to the Pin' : 'Longest Drive';
+    const h = type === 'ctp'
+      ? (state.competitions.ctpHole ?? prize.hole)
+      : (state.competitions.ldHole  ?? prize.hole);
+    el('prize-hole-info').textContent = h ? `Hole ${h}${holeInfo(h)}` : '';
+    el('prize-winner').textContent    = prize.leader;
+    el('prize-overlay').classList.add('visible');
+    clearTimeout(this.timer);
+    this.timer = setTimeout(() => this._dismiss(), 12_000);
+  }
+
+  _dismiss() {
+    el('prize-overlay').classList.remove('visible');
+    setTimeout(() => this._next(), 700); // wait for 0.6s CSS fade
+  }
+}
+
+// ── Utilities + Boot ──────────────────────────────────────────
+const el       = id => document.getElementById(id);
+const pause    = ms => new Promise(r => setTimeout(r, ms));
+const fmtScore = n  => n==null?'\u2014':n===0?'E':n>0?`+${n}`:`${n}`;
+const fmtTime  = d  => d?d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true}):'';
+const esc      = s  => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#x27;');
+
+document.addEventListener('DOMContentLoaded', () => {
+  console.log('[Dashboard] Booting…');
+  window.prizeReveal      = new PrizeReveal();
+  window.sceneRotator     = new SceneRotator();
+  window.spotlightRotator = new HoleSpotlightRotator();
+  const db = initFirebase();
+  if (db) subscribeAll(db);
+  else console.warn('[Dashboard] No Firebase config — static layout only.');
+});
+</script>
+</body>
+</html>

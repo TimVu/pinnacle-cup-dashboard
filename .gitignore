@@ -1,0 +1,14 @@
+# Pinnacle Cup Dashboard
+
+# Firebase credentials — real values, NEVER commit
+firebase-config.js
+
+# macOS
+.DS_Store
+
+# Node (if Firebase CLI installs anything locally)
+node_modules/
+
+# Firebase debug logs
+firebase-debug.log
+.firebase/
