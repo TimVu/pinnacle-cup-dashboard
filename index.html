@@ -359,7 +359,15 @@
     .feed-photo img { width: 100%; height: auto; max-height: 200px; object-fit: cover; display: block; border-radius: 8px; }
     .feed-time { font-size: 10px; color: var(--label-4); margin-top: 3px; }
 
-    /* ── PRIZE REVEAL ─────────────────────────────────────── */
+    /* ── DEBUG PANEL (temporary — remove after Yodeck video issue resolved) ── */
+    #debug-panel {
+      position: fixed; bottom: 40px; left: 12px; z-index: 9999;
+      background: rgba(0,0,0,0.82); color: #fff;
+      font-family: monospace; font-size: 11px; line-height: 1.5;
+      padding: 8px 12px; border-radius: 8px; max-width: 480px;
+      border: 1px solid rgba(255,255,255,0.15); pointer-events: none;
+    }
+    #debug-panel.hidden { display: none; }
     #prize-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.95); display: flex; align-items: center; justify-content: center; z-index: 1000; opacity: 0; pointer-events: none; transition: opacity 0.6s ease; }
     #prize-overlay.visible { opacity: 1; pointer-events: all; }
     .prize-card { background: var(--summit-brown); border-radius: 24px; padding: 52px 80px; text-align: center; border: 1px solid rgba(148,181,255,0.18); max-width: 720px; width: 90%; transform: scale(0.85); opacity: 0; transition: transform 0.55s cubic-bezier(0.34,1.56,0.64,1), opacity 0.45s ease; }
@@ -618,6 +626,9 @@
     </section>
 
   </main>
+
+  <!-- DEBUG PANEL: surfaces video errors visually on Yodeck TV (remove after resolved) -->
+  <div id="debug-panel" class="hidden"></div>
 
   <div id="prize-overlay" role="dialog" aria-modal="true" aria-label="Prize winner announcement">
     <div class="prize-card">
@@ -926,8 +937,12 @@ function updateTicker(){
   if(state.ld?.leader)parts.push(`${state.ld.final?'LD winner':'LD leader'}: ${state.ld.leader}`);
   state.feed.slice(0,3).forEach(p=>{const hs=p.holeNumber?` on Hole ${p.holeNumber}`:'';if(p.type==='director')parts.push(`Director: \u201c${p.text.substring(0,70)}\u201d`);else if(p.imageUrl)parts.push(`${p.author} posted a photo${hs}`);else parts.push(`${p.author}: \u201c${p.text.substring(0,60)}\u201d`);});
   if(!parts.length)return;
-  const v=parts.join(SEP)+SEP;el('ticker-content-a').textContent=v;el('ticker-content-b').textContent=v;
-  const i=el('ticker-inner');i.style.animation='none';i.offsetHeight;i.style.animation='';
+  const v=parts.join(SEP)+SEP;
+  el('ticker-content-a').textContent=v;
+  el('ticker-content-b').textContent=v;
+  // NOTE: animation is NOT reset here — resetting on every Firestore snapshot
+  // caused constant stuttering on the Yodeck RPi. Content updates in-place;
+  // the loop picks up the new text on its next pass.
 }
 function onPrizeFinalized(type,prize){
   console.log(`[Prize] ${type}: ${prize.leader}`);
@@ -986,9 +1001,15 @@ class SceneRotator {
 
       v._canplayHandler = () => {
         if (ph) ph.style.display = 'none';
-        v.play().catch(e => console.error('[Tracer] play() failed:', e));
+        dbg(`canplay fired — calling play()`);
+        v.play().catch(e => { dbg(`play() rejected: ${e.message}`); console.error('[Tracer] play() failed:', e); });
       };
-      v._errorHandler = () => console.error('[Tracer] video error', v.error?.message ?? v.error);
+      v._errorHandler = () => {
+        const err = v.error;
+        const msg = err ? `code ${err.code}: ${err.message}` : 'unknown';
+        dbg(`VIDEO ERROR — ${msg}\nsrc: ${v.src.slice(-60)}`);
+        console.error('[Tracer] video error', err);
+      };
 
       v.addEventListener('canplay', v._canplayHandler);
       v.addEventListener('error',   v._errorHandler);
@@ -1067,6 +1088,16 @@ const pause    = ms => new Promise(r => setTimeout(r, ms));
 const fmtScore = n  => n==null?'\u2014':n===0?'E':n>0?`+${n}`:`${n}`;
 const fmtTime  = d  => d?d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true}):'';
 const esc      = s  => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#x27;');
+// dbg(): writes visible on-screen messages for Yodeck RPi debugging (no console access needed)
+const dbg = msg => {
+  const panel = el('debug-panel'); if (!panel) return;
+  panel.classList.remove('hidden');
+  const line = document.createElement('div');
+  line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+  panel.appendChild(line);
+  // Keep last 6 lines only
+  while (panel.children.length > 6) panel.removeChild(panel.firstChild);
+};
 
 document.addEventListener('DOMContentLoaded', () => {
   console.log('[Dashboard] Booting…');
