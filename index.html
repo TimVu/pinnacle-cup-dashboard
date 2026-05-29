@@ -101,6 +101,20 @@
     .hero-name h2 { font-size: 22px; font-weight: 700; color: #fff; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .hero-name .hero-thru { font-size: 13px; color: rgba(255,255,255,0.45); margin-top: 3px; }
     .hero-score { font-size: 32px; font-weight: 700; color: var(--summit-cornflower); letter-spacing: -1.5px; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+    /* Team list overflow pan (left panel)
+     * #team-list-wrap clips the rows; #team-list translates within it.
+     * Hero card and Individual Prizes card sit outside the wrap, staying static.
+     */
+    @keyframes teamListPan {
+      0%, 15%   { transform: translateY(0); }
+      85%, 100% { transform: translateY(var(--team-scroll, 0px)); }
+    }
+    #team-list-wrap {
+      flex: 1; overflow: hidden; min-height: 0;
+    }
+    #team-list-wrap.is-overflowing #team-list {
+      animation: teamListPan 28s ease-in-out 2s infinite alternate;
+    }
     #team-list { margin: 0 10px; flex-shrink: 0; }
     .team-row { display: flex; align-items: center; padding: 8px 12px; border-bottom: 0.5px solid var(--sys-sep-thin); background: var(--sys-card); }
     .team-row:last-child { border-bottom: none; }
@@ -133,6 +147,14 @@
     #scene-photo { width: 100%; height: 100%; border-radius: 12px; overflow: hidden; background: #1C1C1E; }
     .photo-zone  { width: 100%; height: 100%; position: relative; display: flex; align-items: center; justify-content: center; }
     .photo-zone > img.featured-img { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+    /* Ken Burns intro: each new photo eases in from a slight zoom */
+    @keyframes photoEnter {
+      from { transform: scale(1.05); opacity: 0; }
+      to   { transform: scale(1.0);  opacity: 1; }
+    }
+    .photo-zone > img.featured-img.entering {
+      animation: photoEnter 0.9s cubic-bezier(0.25, 0.46, 0.45, 0.94) forwards;
+    }
     .photo-fpo-icon { color: rgba(255,255,255,0.1); width: 40px; height: 40px; position: relative; z-index: 1; }
     .photo-overlay {
       position: absolute; bottom: 0; left: 0; right: 0; z-index: 2;
@@ -346,7 +368,18 @@
 
     /* ── RIGHT PANEL ──────────────────────────────────────── */
     #panel-feed { width: 28%; background: var(--sys-bg); display: flex; flex-direction: column; overflow: hidden; }
-    #feed-list  { flex: 1; display: flex; flex-direction: column; gap: 1px; background: rgba(0,0,0,0.05); overflow: hidden; }
+    /* Feed overflow peek: sit at top showing newest posts, briefly reveal older content below,
+     * then snap back. Amount is fixed at 160px so it peeks 1-2 posts, not all the way down. */
+    @keyframes feedPeek {
+      0%, 60%  { transform: translateY(0); }
+      75%, 85% { transform: translateY(-160px); }
+      100%     { transform: translateY(0); }
+    }
+    #feed-list  { flex: 1; overflow: hidden; background: rgba(0,0,0,0.05); }
+    #feed-inner { display: flex; flex-direction: column; gap: 1px; }
+    #feed-list.is-overflowing #feed-inner {
+      animation: feedPeek 20s ease-in-out 4s infinite;
+    }
     .feed-item  { background: var(--sys-card); padding: 8px 12px; flex-shrink: 0; }
     .feed-author { font-size: 12px; font-weight: 600; margin-bottom: 3px; display: flex; align-items: center; gap: 0; flex-wrap: wrap; }
     .feed-author.director { color: var(--ios-green); }
@@ -418,11 +451,8 @@
         <div class="presented">Presented at</div>
         <div class="summit-name">Pinnacle Summit 2026</div>
       </div>
-      <div class="scene-dots" id="scene-dots" aria-hidden="true">
-        <div class="scene-dot active"></div>
-        <div class="scene-dot"></div>
-        <div class="scene-dot"></div>
-      </div>
+      <!-- Scene dots removed from header — they were orphaned (never updated).
+           The functional dots live in the Highlights panel label bar below. -->
       <div class="live-pill" role="status" aria-live="polite">
         <div class="live-dot"></div>
         <span>LIVE</span>
@@ -449,11 +479,15 @@
           <div class="hero-score" id="hero-score">&#8212;</div>
         </div>
       </div>
-      <div id="team-list" class="card" style="margin:0 10px;">
-        <div class="team-row" style="justify-content:center;">
-          <span style="font-size:12px;color:var(--label-3);">Loading&hellip;</span>
+      <!-- #team-list-wrap: overflow container — only the team rows scroll.
+           Hero card (above) and Individual Prizes (below) stay static. -->
+      <div id="team-list-wrap">
+        <div id="team-list" class="card" style="margin:0 10px;">
+          <div class="team-row" style="justify-content:center;">
+            <span style="font-size:12px;color:var(--label-3);">Loading&hellip;</span>
+          </div>
         </div>
-      </div>
+      </div><!-- /#team-list-wrap -->
       <div class="panel-section-label" style="margin-top:4px;">Individual Prizes</div>
       <div id="competitions-card" class="card">
         <div class="comp-row">
@@ -678,7 +712,7 @@
 'use strict';
 
 const RANK_DELTA_TIMEOUT_MS = 10 * 60 * 1000;
-const FEED_MAX_DISPLAY      = 5;
+const FEED_MAX_DISPLAY      = 10;
 const SCENE_INTERVAL_MS     = 20_000;
 const SPOTLIGHT_INTERVAL_MS = 25_000;
 const DIRECTOR_RECENCY_MS   = 30 * 60 * 1000;
@@ -712,7 +746,7 @@ function subscribeAll(db) {
     snap.forEach(d => { state.scores[d.id] = d.data(); });
     state.ready.scores = true; tryRenderLeaderboard(); updateTicker(); window.spotlightRotator?.onDataUpdate();
   }, e => console.warn('[scores]', e.message));
-  db.collection('feed').orderBy('timestamp','desc').limit(10).onSnapshot(snap => {
+  db.collection('feed').orderBy('timestamp','desc').limit(15).onSnapshot(snap => {
     state.feed = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     renderFeed(); updateTicker(); window.sceneRotator?.onDataUpdate();
   }, e => console.warn('[feed]', e.message));
@@ -786,6 +820,23 @@ function renderLeaderboard() {
     row.style.transition = 'transform 0.45s cubic-bezier(0.34, 1.2, 0.64, 1)';
     row.style.transform  = 'translateY(0)';
   });
+
+  // Check if team list overflows its wrapper (18+ team tournaments)
+  requestAnimationFrame(() => checkTeamListOverflow());
+}
+
+function checkTeamListOverflow() {
+  const wrap = document.getElementById('team-list-wrap');
+  const list = el('team-list');
+  if (!wrap || !list) return;
+  const overflow = list.offsetHeight - wrap.clientHeight;
+  if (overflow > 8) {
+    wrap.style.setProperty('--team-scroll', `-${overflow}px`);
+    wrap.classList.add('is-overflowing');
+  } else {
+    wrap.classList.remove('is-overflowing');
+    wrap.style.removeProperty('--team-scroll');
+  }
 }
 
 // ── Hole Spotlight ────────────────────────────────────────────
@@ -802,6 +853,7 @@ function renderHoleSpotlight() {
   sub.forEach(s=>{if(s.relToPar<=-2)eagle++;else if(s.relToPar===-1)birdie++;else if(s.relToPar===0)par++;else bogey++;});
 
   el('hole-donut').innerHTML = buildDonutSVG(eagle, birdie, par, bogey);
+  animateDonut();
 
   // Compact vertical legend in the chart column
   el('hole-legend-v').innerHTML = [
@@ -840,6 +892,24 @@ function getHoleScores(hi) {
     return{teamId:t.id,teamName:t.name,strokes:s,relToPar:s!=null?s-p:null};
   });
 }
+// Animate donut arcs drawing in using stroke-dashoffset.
+// Each arc starts hidden (shifted back by the full circumference) then
+// transitions to its target position, staggered by index.
+function animateDonut() {
+  const CIRC = 2 * Math.PI * 22; // ≈ 138.23 — circumference of r=22 circle
+  el('hole-donut').querySelectorAll('circle[stroke-dasharray]').forEach((c, i) => {
+    const origOffset = parseFloat(c.getAttribute('stroke-dashoffset') || '0');
+    // Snap to hidden position (one full circumference behind)
+    c.style.transition = 'none';
+    c.style.strokeDashoffset = origOffset - CIRC;
+    // Double rAF: first commits the snap, second starts the transition
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      c.style.transition = `stroke-dashoffset 0.7s cubic-bezier(0.33, 1, 0.68, 1) ${i * 0.1}s`;
+      c.style.strokeDashoffset = origOffset;
+    }));
+  });
+}
+
 function buildDonutSVG(eagle,birdie,par,bogey) {
   const tot=eagle+birdie+par+bogey;
   const base=`<circle cx="30" cy="30" r="22" fill="none" stroke="#EBEBF0" stroke-width="10"/>`;
@@ -879,6 +949,22 @@ function renderFeed() {
     const teamBit=teamName?`<span class="feed-team-tag">${esc(teamName)}</span>`:'';
     return`<article class="feed-item"><div class="feed-author ${ac}">${ap}${esc(p.author)}${teamBit}</div><p class="feed-body">${esc(p.text)}</p>${ph}<div class="feed-time">${ts}${ht}</div></article>`;
   }).join('');
+  // Wrap items in #feed-inner for the overflow pan animation
+  el('feed-list').innerHTML = `<div id="feed-inner">${el('feed-list').innerHTML}</div>`;
+  requestAnimationFrame(() => checkFeedOverflow());
+}
+
+function checkFeedOverflow() {
+  const list = el('feed-list'), inner = document.getElementById('feed-inner');
+  if (!inner) return;
+  const overflow = inner.offsetHeight - list.clientHeight;
+  if (overflow > 12) {
+    list.style.setProperty('--feed-scroll', `-${overflow}px`);
+    list.classList.add('is-overflowing');
+  } else {
+    list.classList.remove('is-overflowing');
+    list.style.removeProperty('--feed-scroll');
+  }
 }
 
 // ── Featured card ─────────────────────────────────────────────
@@ -895,7 +981,23 @@ function renderFeaturedCard(post) {
   else locEl.style.display='none';
   // Photo
   const zone=document.querySelector('.photo-zone'),img=zone.querySelector('img.featured-img'),fpo=zone.querySelector('.photo-fpo-icon');
-  if(post.imageUrl){if(img){img.src=post.imageUrl;}else{const i=document.createElement('img');i.src=post.imageUrl;i.alt='';i.className='featured-img';i.onerror=()=>i.remove();zone.insertBefore(i,zone.firstChild);}if(fpo)fpo.style.display='none';}
+  if(post.imageUrl){
+    if(img){
+      img.src=post.imageUrl;
+      // Re-trigger Ken Burns intro on source change
+      img.classList.remove('entering');
+      img.getBoundingClientRect();
+      img.classList.add('entering');
+      setTimeout(() => img.classList.remove('entering'), 900);
+    } else {
+      const i=document.createElement('img');
+      i.src=post.imageUrl; i.alt=''; i.className='featured-img entering';
+      i.onerror=()=>i.remove();
+      setTimeout(() => i.classList.remove('entering'), 900);
+      zone.insertBefore(i,zone.firstChild);
+    }
+    if(fpo)fpo.style.display='none';
+  }
   else{if(img)img.remove();if(fpo)fpo.style.display='';}
 }
 
@@ -963,7 +1065,29 @@ class SceneRotator {
     while(ti<Math.min(state.shotTracers.length,3))scenes.push({type:'tracer',data:state.shotTracers[ti++]});
     return scenes;
   }
-  onDataUpdate(){const q=this._buildQueue();if(!q.length)return;if(this.idx>=q.length)this.idx=0;this.queue=q;if(!this.started){this._showCurrent();this.timer=setInterval(()=>this._advance(),SCENE_INTERVAL_MS);this.started=true;}}
+  onDataUpdate(){
+    const q = this._buildQueue();
+    if (!q.length) return;
+
+    // If the front of the queue changed (new photo/tracer posted), wind idx
+    // to the end of the current queue so the next _advance() wraps to 0
+    // (newest content) rather than continuing from wherever we were.
+    const frontChanged = this.queue.length > 0 &&
+      q[0]?.data?.id !== this.queue[0]?.data?.id;
+
+    if (frontChanged) {
+      this.idx = q.length - 1; // wraps to 0 on next _advance()
+    } else if (this.idx >= q.length) {
+      this.idx = 0;
+    }
+    this.queue = q;
+
+    if (!this.started) {
+      this._showCurrent();
+      this.timer = setInterval(() => this._advance(), SCENE_INTERVAL_MS);
+      this.started = true;
+    }
+  }
   _advance(){this.queue=this._buildQueue();if(!this.queue.length)return;this.idx=(this.idx+1)%this.queue.length;this._showCurrent();}
   _showCurrent(){
     this.queue=this._buildQueue();if(!this.queue.length){this._fallback();return;}
