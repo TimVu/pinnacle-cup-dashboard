@@ -94,7 +94,7 @@
     /* ── LEFT PANEL ───────────────────────────────────────── */
     #panel-leaderboard { width: 25%; background: var(--sys-bg); display: flex; flex-direction: column; overflow: hidden; }
     .panel-section-label { font-size: 11px; font-weight: 600; color: var(--label-3); letter-spacing: 1px; text-transform: uppercase; padding: 7px 12px 3px; flex-shrink: 0; }
-    #leader-hero { margin: 0 10px 4px; padding: 16px 18px; background: var(--summit-brown); border-radius: 14px; flex-shrink: 0; }
+    #leader-hero { margin: 6px 10px 0; padding: 16px 18px; background: var(--summit-brown); border-radius: 14px; flex-shrink: 0; }
     .hero-eyebrow { font-size: 10px; font-weight: 700; color: var(--summit-cornflower); letter-spacing: 2px; text-transform: uppercase; margin-bottom: 10px; }
     .hero-content { display: flex; align-items: flex-start; gap: 10px; }
     .hero-name { flex: 1; min-width: 0; }
@@ -302,6 +302,28 @@
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
 
+    /* Hole spotlight: only body + stats fade on hole change — header stays visible */
+    .hole-body, .hole-stats-row { transition: opacity 0.28s ease; }
+
+    /* Score rows reveal: staggered slide-in from right when hole content updates */
+    @keyframes scoreRowReveal {
+      from { opacity: 0; transform: translateX(10px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+    #hole-score-rows .hole-score-row { animation: scoreRowReveal 0.35s ease-out both; }
+    #hole-score-rows .hole-score-row:nth-child(1) { animation-delay: 0.04s; }
+    #hole-score-rows .hole-score-row:nth-child(2) { animation-delay: 0.10s; }
+    #hole-score-rows .hole-score-row:nth-child(3) { animation-delay: 0.16s; }
+    #hole-score-rows .hole-score-row:nth-child(4) { animation-delay: 0.22s; }
+    #hole-score-rows .hole-score-row:nth-child(5) { animation-delay: 0.28s; }
+
+    /* Hole number reveal: subtle drop-in when hole changes */
+    @keyframes holeNumReveal {
+      from { opacity: 0.2; transform: translateY(-5px); }
+      to   { opacity: 1;   transform: translateY(0); }
+    }
+    #spotlight-number.reveal { animation: holeNumReveal 0.4s ease-out forwards; }
+
     /* Stats row: pinned to bottom via margin-top:auto */
     .hole-stats-row {
       display: flex; align-items: center; gap: 10px;
@@ -468,7 +490,6 @@
         <span class="section-label">Standings</span>
         <span class="section-badge">&#916; since last submission</span>
       </div>
-      <div class="panel-section-label">Team Prize</div>
       <div id="leader-hero">
         <div class="hero-eyebrow">Current Leader</div>
         <div class="hero-content">
@@ -479,6 +500,7 @@
           <div class="hero-score" id="hero-score">&#8212;</div>
         </div>
       </div>
+      <div class="panel-section-label">Team Prize</div>
       <!-- #team-list-wrap: overflow container — only the team rows scroll.
            Hero card (above) and Individual Prizes (below) stay static. -->
       <div id="team-list-wrap">
@@ -712,7 +734,8 @@
 'use strict';
 
 const RANK_DELTA_TIMEOUT_MS = 10 * 60 * 1000;
-const FEED_MAX_DISPLAY      = 10;
+const FEED_MAX_DISPLAY      = 8;  // enough for reliable overflow; lean at end of tournament
+const DEBUG_PANEL_ENABLED   = false; // set true to show on-screen debug (Yodeck troubleshooting)
 const SCENE_INTERVAL_MS     = 20_000;
 const SPOTLIGHT_INTERVAL_MS = 25_000;
 const DIRECTOR_RECENCY_MS   = 30 * 60 * 1000;
@@ -746,7 +769,7 @@ function subscribeAll(db) {
     snap.forEach(d => { state.scores[d.id] = d.data(); });
     state.ready.scores = true; tryRenderLeaderboard(); updateTicker(); window.spotlightRotator?.onDataUpdate();
   }, e => console.warn('[scores]', e.message));
-  db.collection('feed').orderBy('timestamp','desc').limit(15).onSnapshot(snap => {
+  db.collection('feed').orderBy('timestamp','desc').limit(12).onSnapshot(snap => {
     state.feed = snap.docs.map(d => ({ id: d.id, ...d.data() }));
     renderFeed(); updateTicker(); window.sceneRotator?.onDataUpdate();
   }, e => console.warn('[feed]', e.message));
@@ -843,7 +866,12 @@ function checkTeamListOverflow() {
 function renderHoleSpotlight() {
   const h=getSpotlightHole(); if(!h)return;
   const hi=h-1, info=state.courseHoles[hi]||{par:4,yards:0}, scores=getHoleScores(hi);
-  el('spotlight-number').textContent    = h;
+  // Hole number reveal animation on each hole change
+  const numEl = el('spotlight-number');
+  numEl.classList.remove('reveal');
+  numEl.getBoundingClientRect();
+  numEl.textContent = h;
+  numEl.classList.add('reveal');
   el('spotlight-par-yards').textContent = `Par ${info.par} \u00b7 ${info.yards} yds`;
   el('hole-scores-header').textContent  = `Team scores \u2014 Hole ${h}`;
   const sub=scores.filter(s=>s.strokes!=null);
@@ -1166,8 +1194,16 @@ class HoleSpotlightRotator {
     if(!this.started){this.timer=setInterval(()=>this._rotate(),SPOTLIGHT_INTERVAL_MS);this.started=true;}
   }
   async _rotate(){
-    const q=this._buildQueue();if(q.length<=1)return;this.queue=q;this.idx=(this.idx+1)%q.length;state.spotlightHole=q[this.idx];
-    const c=el('hole-spotlight-card');c.style.opacity='0.15';await pause(350);renderHoleSpotlight();c.style.opacity='1';
+    const q=this._buildQueue();if(q.length<=1)return;
+    this.queue=q;this.idx=(this.idx+1)%q.length;state.spotlightHole=q[this.idx];
+    // Fade only body + stats — brown header stays visible throughout
+    const card  = el('hole-spotlight-card');
+    const body  = card.querySelector('.hole-body');
+    const stats = card.querySelector('.hole-stats-row');
+    [body, stats].forEach(e => { if (e) e.style.opacity = '0'; });
+    await pause(300);
+    renderHoleSpotlight();
+    [body, stats].forEach(e => { if (e) e.style.opacity = '1'; });
   }
 }
 
@@ -1212,8 +1248,11 @@ const pause    = ms => new Promise(r => setTimeout(r, ms));
 const fmtScore = n  => n==null?'\u2014':n===0?'E':n>0?`+${n}`:`${n}`;
 const fmtTime  = d  => d?d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true}):'';
 const esc      = s  => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#x27;');
-// dbg(): writes visible on-screen messages for Yodeck RPi debugging (no console access needed)
+// dbg(): on-screen debug panel for Yodeck RPi troubleshooting.
+// Set DEBUG_PANEL_ENABLED = true at the top of the script to make it visible.
 const dbg = msg => {
+  console.log('[dbg]', msg);
+  if (!DEBUG_PANEL_ENABLED) return;
   const panel = el('debug-panel'); if (!panel) return;
   panel.classList.remove('hidden');
   const line = document.createElement('div');
