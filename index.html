@@ -141,7 +141,8 @@
     #panel-highlights { flex: 1; background: var(--sys-bg); display: flex; flex-direction: column; padding: 7px 8px; gap: 6px; overflow: hidden; min-width: 0; }
     .highlights-bar { display: flex; align-items: center; justify-content: space-between; padding: 0 2px; flex-shrink: 0; }
     #featured-card { flex: 4; min-height: 0; position: relative; }
-    #scene-photo, #scene-tracer { transition: opacity 0.4s ease; }
+    /* Photo scene keeps opacity fade. Tracer uses display-only toggle (Pi GPU compositor fix). */
+    #scene-photo { transition: opacity 0.4s ease; }
 
     /* ── Scene: photo ─────────────────────────────────────── */
     #scene-photo { width: 100%; height: 100%; border-radius: 12px; overflow: hidden; background: #1C1C1E; }
@@ -192,7 +193,9 @@
       overflow: hidden; position: absolute; inset: 0;
     }
     .tracer-video-zone { flex: 1; position: relative; min-height: 0; background: #000; overflow: hidden; }
-    #tracer-video { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; display: block; }
+    /* (a) object-fit:cover removed — Pi black-video fix (Yodeck suggestion a)
+     * (c) translateZ(0) forces own GPU layer — Pi black-video fix (Yodeck suggestion c) */
+    #tracer-video { position: absolute; inset: 0; width: 100%; height: 100%; display: block; transform: translateZ(0); }
     .tracer-placeholder { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; z-index: 1; }
     .tracer-play-btn { width: 52px; height: 52px; border-radius: 50%; background: rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; }
     .tracer-play-btn svg { width: 22px; height: 22px; fill: rgba(255,255,255,0.5); margin-left: 3px; }
@@ -1127,11 +1130,33 @@ class SceneRotator {
   }
   async _go(type,data){
     if(this.transitioning)return;this.transitioning=true;
-    const pEl=el('scene-photo'),tEl=el('scene-tracer'),showEl=type==='photo'?pEl:tEl,hideEl=type==='photo'?tEl:pEl;
-    if(showEl.style.display!=='none'&&showEl.style.display!==''){type==='photo'?renderFeaturedCard(data):this._tracer(data);this.transitioning=false;return;}
-    hideEl.style.opacity='0';await pause(400);hideEl.style.display='none';hideEl.style.opacity='';
+    const pEl=el('scene-photo'),tEl=el('scene-tracer');
+    const showEl=type==='photo'?pEl:tEl, hideEl=type==='photo'?tEl:pEl;
+
+    // Already showing this scene — just update content
+    if(showEl.style.display!==''&&showEl.style.display!=='none'){
+      type==='photo'?renderFeaturedCard(data):this._tracer(data);
+      this.transitioning=false;return;
+    }
+
+    // Hide outgoing scene
+    // (b) Tracer uses display-only — no opacity fade during hardware video on Pi
+    if(hideEl===tEl){
+      hideEl.style.display='none';
+    } else {
+      hideEl.style.opacity='0';await pause(400);hideEl.style.display='none';hideEl.style.opacity='';
+    }
+
+    // Load content into incoming scene
     type==='photo'?renderFeaturedCard(data):this._tracer(data);
-    showEl.style.opacity='0';showEl.style.display='flex';await pause(20);showEl.style.opacity='1';this.transitioning=false;
+
+    // Show incoming scene
+    if(showEl===tEl){
+      showEl.style.display='flex'; // display-only, no opacity transition
+    } else {
+      showEl.style.opacity='0';showEl.style.display='flex';await pause(20);showEl.style.opacity='1';
+    }
+    this.transitioning=false;
   }
   // Tracer: video overlay — play triggered from canplay event (Yodeck RPi fix)
   _tracer(t){
