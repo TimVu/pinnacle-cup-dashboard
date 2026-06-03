@@ -1089,12 +1089,16 @@ class SceneRotator {
   constructor(){this.queue=[];this.idx=0;this.timer=null;this.transitioning=false;this.started=false;this.sceneStartTime=null;}
   _buildQueue(){
     const scenes=[],now=Date.now();
+    // Only include tracers the Cloud Function has already transcoded to Pi-friendly
+    // H.264. Un-transcoded originals (often 4K phone video) would stutter badly and
+    // freeze the page, so a tracer waits until transcoded:true before it can show.
+    const tracers=state.shotTracers.filter(t=>t.transcoded===true);
     const dp=state.feed.find(p=>p.type==='director'&&p.imageUrl&&(p.timestamp?.toDate?.()?.getTime()??0)>now-DIRECTOR_RECENCY_MS);
     if(dp)scenes.push({type:'photo',data:dp});
     const pp=state.feed.filter(p=>p!==dp&&p.imageUrl).slice(0,5);
     let ti=0;
-    pp.forEach((p,i)=>{scenes.push({type:'photo',data:p});if((i+1)%2===0&&ti<state.shotTracers.length)scenes.push({type:'tracer',data:state.shotTracers[ti++]});});
-    while(ti<Math.min(state.shotTracers.length,3))scenes.push({type:'tracer',data:state.shotTracers[ti++]});
+    pp.forEach((p,i)=>{scenes.push({type:'photo',data:p});if((i+1)%2===0&&ti<tracers.length)scenes.push({type:'tracer',data:tracers[ti++]});});
+    while(ti<Math.min(tracers.length,3))scenes.push({type:'tracer',data:tracers[ti++]});
     return scenes;
   }
   onDataUpdate(){
