@@ -6,7 +6,12 @@
       "**/.*",
       "firebase-config.js.example",
       "HANDOFF.md",
-      "*.md"
+      "*.md",
+      "functions/**"
     ]
+  },
+  "functions": {
+    "source": "functions",
+    "runtime": "nodejs20"
   }
 }

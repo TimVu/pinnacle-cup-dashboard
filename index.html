@@ -193,9 +193,9 @@
       overflow: hidden; position: absolute; inset: 0;
     }
     .tracer-video-zone { flex: 1; position: relative; min-height: 0; background: #000; overflow: hidden; }
-    /* (a) object-fit:cover removed — Pi black-video fix (Yodeck suggestion a)
-     * (c) translateZ(0) forces own GPU layer — Pi black-video fix (Yodeck suggestion c) */
-    #tracer-video { position: absolute; inset: 0; width: 100%; height: 100%; display: block; transform: translateZ(0); }
+    /* object-fit:cover fills the frame (no letterbox). Safe now — the black
+     * video was the HEVC codec, not this property. translateZ(0) keeps its own GPU layer. */
+    #tracer-video { position: absolute; inset: 0; width: 100%; height: 100%; display: block; object-fit: cover; transform: translateZ(0); }
     .tracer-placeholder { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; z-index: 1; }
     .tracer-play-btn { width: 52px; height: 52px; border-radius: 50%; background: rgba(255,255,255,0.1); display: flex; align-items: center; justify-content: center; }
     .tracer-play-btn svg { width: 22px; height: 22px; fill: rgba(255,255,255,0.5); margin-left: 3px; }
@@ -569,7 +569,7 @@
         <!-- Scene: shot tracer — overlay info on video, not a footer bar -->
         <div id="scene-tracer">
           <div class="tracer-video-zone">
-            <video id="tracer-video" muted autoplay loop playsinline></video>
+            <video id="tracer-video" muted autoplay playsinline></video>
             <div class="tracer-placeholder">
               <div class="tracer-play-btn">
                 <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14l11-7z"/></svg>
@@ -740,6 +740,7 @@ const RANK_DELTA_TIMEOUT_MS = 10 * 60 * 1000;
 const FEED_MAX_DISPLAY      = 8;  // enough for reliable overflow; lean at end of tournament
 const DEBUG_PANEL_ENABLED   = true; // ON for Yodeck video diagnostics — set false once resolved
 const SCENE_INTERVAL_MS     = 20_000;
+const TRACER_FALLBACK_MS    = 40_000; // max time to show a tracer if its 'ended' event never fires
 const SPOTLIGHT_INTERVAL_MS = 25_000;
 const DIRECTOR_RECENCY_MS   = 30 * 60 * 1000;
 
@@ -1101,31 +1102,49 @@ class SceneRotator {
     if (!q.length) return;
 
     // If the front of the queue changed (new photo/tracer posted), wind idx
-    // to the end of the current queue so the next _advance() wraps to 0
-    // (newest content) rather than continuing from wherever we were.
+    // to the end of the current queue so the next _advance() wraps to 0 (newest).
     const frontChanged = this.queue.length > 0 &&
       q[0]?.data?.id !== this.queue[0]?.data?.id;
 
     if (frontChanged) {
-      this.idx = q.length - 1; // wraps to 0 on next _advance()
+      this.idx = q.length - 1;
     } else if (this.idx >= q.length) {
       this.idx = 0;
     }
     this.queue = q;
 
     if (!this.started) {
-      this._showCurrent();
-      this.timer = setInterval(() => this._advance(), SCENE_INTERVAL_MS);
       this.started = true;
+      if (frontChanged) {
+        this._advance();      // wraps to 0 (newest) and shows it
+      } else {
+        this.idx = 0;
+        this._showCurrent();  // show the first scene
+      }
     }
   }
-  _advance(){this.queue=this._buildQueue();if(!this.queue.length)return;this.idx=(this.idx+1)%this.queue.length;this._showCurrent();}
+  // Self-scheduling timer (replaces setInterval) so each scene type can set
+  // its own duration: photos = fixed interval, tracers = until the clip ends.
+  _scheduleNext(ms){ clearTimeout(this.timer); this.timer = setTimeout(() => this._advance(), ms); }
+  _advance(){
+    this.queue=this._buildQueue();
+    if(!this.queue.length){this._fallback();this._scheduleNext(SCENE_INTERVAL_MS);return;}
+    this.idx=(this.idx+1)%this.queue.length;
+    this._showCurrent();
+  }
   _showCurrent(){
-    this.queue=this._buildQueue();if(!this.queue.length){this._fallback();return;}
+    this.queue=this._buildQueue();if(!this.queue.length){this._fallback();this._scheduleNext(SCENE_INTERVAL_MS);return;}
     if(this.idx>=this.queue.length)this.idx=0;
     this.sceneStartTime=Date.now();
     const s=this.queue[this.idx];
-    s.type==='photo'?this._go('photo',s.data):this._go('tracer',s.data);
+    if(s.type==='photo'){
+      this._go('photo',s.data);
+      this._scheduleNext(SCENE_INTERVAL_MS);
+    } else {
+      this._go('tracer',s.data);
+      // Tracer advances when the clip fires 'ended'; this is just a safety fallback
+      this._scheduleNext(TRACER_FALLBACK_MS);
+    }
     this._dots();
   }
   async _go(type,data){
@@ -1142,6 +1161,7 @@ class SceneRotator {
     // Hide outgoing scene
     // (b) Tracer uses display-only — no opacity fade during hardware video on Pi
     if(hideEl===tEl){
+      el('tracer-video').pause(); // stop decoding while off-screen (and prevent stale 'ended')
       hideEl.style.display='none';
     } else {
       hideEl.style.opacity='0';await pause(400);hideEl.style.display='none';hideEl.style.opacity='';
@@ -1173,7 +1193,7 @@ class SceneRotator {
 
     if (v.src !== t.videoUrl) {
       // New source — clear old listeners before attaching fresh ones
-      ['canplay','error','loadedmetadata','playing','stalled','suspend'].forEach(evt =>
+      ['canplay','error','loadedmetadata','playing','stalled','suspend','ended'].forEach(evt =>
         v.removeEventListener(evt, v['_h_'+evt]));
 
       // Decoded dimensions are the key signal: 0x0 after metadata/canplay
@@ -1191,6 +1211,8 @@ class SceneRotator {
         const err = v.error;
         dbg(`ERROR code ${err?.code}: ${err?.message || 'unknown'}`);
       };
+      // Play once, then advance to the next scene when the clip finishes
+      v._h_ended = () => { dbg('ended — next scene'); this._advance(); };
 
       v.addEventListener('loadedmetadata', v._h_loadedmetadata);
       v.addEventListener('canplay',        v._h_canplay);
@@ -1198,14 +1220,16 @@ class SceneRotator {
       v.addEventListener('stalled',        v._h_stalled);
       v.addEventListener('suspend',        v._h_suspend);
       v.addEventListener('error',          v._h_error);
+      v.addEventListener('ended',          v._h_ended);
 
       dbg(`loading: ...${t.videoUrl.slice(-40)}`);
       v.src = t.videoUrl;
       v.load();
       // play() fires from canplay — NOT called directly here
     } else {
-      // Same source already buffered — play immediately
+      // Same source — replay from the start
       if (ph) ph.style.display = 'none';
+      try { v.currentTime = 0; } catch (_) {}
       v.play().catch(e => console.error('[Tracer] play() failed:', e));
     }
   }
