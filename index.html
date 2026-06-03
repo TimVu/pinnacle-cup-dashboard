@@ -405,6 +405,12 @@
     #feed-list.is-overflowing #feed-inner {
       animation: feedPeek 20s ease-in-out 4s infinite;
     }
+    /* While a tracer video is on-screen, pause the side-panel pans so the Pi's
+       GPU/compositor isn't juggling video decode + two panning layers at once. */
+    #app.video-active #feed-list.is-overflowing #feed-inner,
+    #app.video-active #team-list-wrap.is-overflowing #team-list {
+      animation-play-state: paused;
+    }
     .feed-item  { background: var(--sys-card); padding: 8px 12px; flex-shrink: 0; }
     .feed-author { font-size: 12px; font-weight: 600; margin-bottom: 3px; display: flex; align-items: center; gap: 0; flex-wrap: wrap; }
     .feed-author.director { color: var(--ios-green); }
@@ -417,15 +423,7 @@
     .feed-photo img { width: 100%; height: auto; max-height: 200px; object-fit: cover; display: block; border-radius: 8px; }
     .feed-time { font-size: 10px; color: var(--label-4); margin-top: 3px; }
 
-    /* ── DEBUG PANEL (temporary — remove after Yodeck video issue resolved) ── */
-    #debug-panel {
-      position: fixed; bottom: 40px; left: 12px; z-index: 9999;
-      background: rgba(0,0,0,0.82); color: #fff;
-      font-family: monospace; font-size: 11px; line-height: 1.5;
-      padding: 8px 12px; border-radius: 8px; max-width: 480px;
-      border: 1px solid rgba(255,255,255,0.15); pointer-events: none;
-    }
-    #debug-panel.hidden { display: none; }
+    /* ── DEBUG PANEL (removed — diagnostics now console-only via dbg()) ── */
     #prize-overlay { position: fixed; inset: 0; background: rgba(0,0,0,0.95); display: flex; align-items: center; justify-content: center; z-index: 1000; opacity: 0; pointer-events: none; transition: opacity 0.6s ease; }
     #prize-overlay.visible { opacity: 1; pointer-events: all; }
     .prize-card { background: var(--summit-brown); border-radius: 24px; padding: 52px 80px; text-align: center; border: 1px solid rgba(148,181,255,0.18); max-width: 720px; width: 90%; transform: scale(0.85); opacity: 0; transition: transform 0.55s cubic-bezier(0.34,1.56,0.64,1), opacity 0.45s ease; }
@@ -442,9 +440,10 @@
     .footer-live span { font-size: 11px; font-weight: 700; color: var(--ios-red); letter-spacing: 0.8px; }
     .footer-divider { width: 0.5px; height: 14px; background: rgba(0,0,0,0.1); flex-shrink: 0; }
     #ticker-wrap { flex: 1; overflow: hidden; min-width: 0; }
-    #ticker-inner { display: inline-flex; white-space: nowrap; animation: tickerScroll 80s linear infinite; will-change: transform; }
+    #ticker-inner { display: inline-flex; white-space: nowrap; animation: tickerScroll 80s linear infinite; will-change: transform; backface-visibility: hidden; }
     #ticker-inner span { font-size: 12px; color: var(--label-3); padding-right: 80px; }
-    @keyframes tickerScroll { 0%{transform:translateX(0)} 100%{transform:translateX(-50%)} }
+    /* translate3d (not translateX) forces compositor-thread animation on the Pi GPU */
+    @keyframes tickerScroll { 0%{transform:translate3d(0,0,0)} 100%{transform:translate3d(-50%,0,0)} }
     #course-logo-slot { display: flex; align-items: center; gap: 7px; flex-shrink: 0; border-left: 0.5px solid rgba(0,0,0,0.08); padding-left: 12px; }
     #course-logo-slot.hidden { display: none; }
     #course-logo-img { width: 26px; height: 26px; border-radius: 4px; background: var(--sys-bg); border: 0.5px solid rgba(0,0,0,0.08); object-fit: contain; }
@@ -686,9 +685,6 @@
 
   </main>
 
-  <!-- DEBUG PANEL: surfaces video errors visually on Yodeck TV (remove after resolved) -->
-  <div id="debug-panel" class="hidden"></div>
-
   <div id="prize-overlay" role="dialog" aria-modal="true" aria-label="Prize winner announcement">
     <div class="prize-card">
       <div class="prize-official">&#127942;&nbsp; Official Winner &nbsp;&#127942;</div>
@@ -738,7 +734,6 @@
 
 const RANK_DELTA_TIMEOUT_MS = 10 * 60 * 1000;
 const FEED_MAX_DISPLAY      = 8;  // enough for reliable overflow; lean at end of tournament
-const DEBUG_PANEL_ENABLED   = true; // ON for Yodeck video diagnostics — set false once resolved
 const SCENE_INTERVAL_MS     = 20_000;
 const TRACER_FALLBACK_MS    = 40_000; // max time to show a tracer if its 'ended' event never fires
 const SPOTLIGHT_INTERVAL_MS = 25_000;
@@ -1072,6 +1067,9 @@ function updateTicker(){
   state.feed.slice(0,3).forEach(p=>{const hs=p.holeNumber?` on Hole ${p.holeNumber}`:'';if(p.type==='director')parts.push(`Director: \u201c${p.text.substring(0,70)}\u201d`);else if(p.imageUrl)parts.push(`${p.author} posted a photo${hs}`);else parts.push(`${p.author}: \u201c${p.text.substring(0,60)}\u201d`);});
   if(!parts.length)return;
   const v=parts.join(SEP)+SEP;
+  // Skip the DOM write when the text is unchanged. Writing textContent on the
+  // animating ticker layer forces a repaint that stutters on the Pi.
+  if(el('ticker-content-a').textContent===v)return;
   el('ticker-content-a').textContent=v;
   el('ticker-content-b').textContent=v;
   // NOTE: animation is NOT reset here — resetting on every Firestore snapshot
@@ -1153,6 +1151,8 @@ class SceneRotator {
   }
   async _go(type,data){
     if(this.transitioning)return;this.transitioning=true;
+    // Pause side-panel pans while a video is on-screen (frees the Pi's compositor)
+    el('app').classList.toggle('video-active', type==='tracer');
     const pEl=el('scene-photo'),tEl=el('scene-tracer');
     const showEl=type==='photo'?pEl:tEl, hideEl=type==='photo'?tEl:pEl;
 
@@ -1310,19 +1310,9 @@ const pause    = ms => new Promise(r => setTimeout(r, ms));
 const fmtScore = n  => n==null?'\u2014':n===0?'E':n>0?`+${n}`:`${n}`;
 const fmtTime  = d  => d?d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit',hour12:true}):'';
 const esc      = s  => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#x27;');
-// dbg(): on-screen debug panel for Yodeck RPi troubleshooting.
-// Set DEBUG_PANEL_ENABLED = true at the top of the script to make it visible.
-const dbg = msg => {
-  console.log('[dbg]', msg);
-  if (!DEBUG_PANEL_ENABLED) return;
-  const panel = el('debug-panel'); if (!panel) return;
-  panel.classList.remove('hidden');
-  const line = document.createElement('div');
-  line.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
-  panel.appendChild(line);
-  // Keep last 6 lines only
-  while (panel.children.length > 6) panel.removeChild(panel.firstChild);
-};
+// dbg(): console-only diagnostics (on-screen panel removed). Useful when
+// viewing the dashboard in a desktop browser with devtools open.
+const dbg = msg => console.log('[dbg]', msg);
 
 document.addEventListener('DOMContentLoaded', () => {
   console.log('[Dashboard] Booting…');
