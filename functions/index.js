@@ -97,14 +97,14 @@ exports.transcodeTracer = onObjectFinalized(
         ffmpeg(tmpIn)
           .videoCodec('libx264')
           .audioCodec('aac')
-          .videoFilters("scale='min(1280,iw)':-2") // cap width at 1280 (≤720p), keep aspect, never upscale
+          .videoFilters("scale=-2:'min(720,ih)'") // cap HEIGHT at 720: a 4:3 source becomes 960x720, not 1280x960 (~44% fewer pixels)
           .fps(30)                                  // cap 30fps — halves decode load for 60fps phone video
           .outputOptions([
             '-profile:v', 'baseline',   // no B-frames — simplest, smoothest decode on the Pi
             '-level', '3.1',
             '-pix_fmt', 'yuv420p',      // critical: Pi can't decode yuv422/444
-            '-maxrate', '2500k',        // cap peak bitrate so the Pi decoder keeps up
-            '-bufsize', '5000k',
+            '-maxrate', '2000k',        // cap peak bitrate so the Pi decoder keeps up
+            '-bufsize', '4000k',
             '-movflags', '+faststart',  // moov atom up front for fast web start
             '-preset', 'veryfast',      // short clips — speed over compression
             '-crf', '23',               // good visual quality
